@@ -27,7 +27,7 @@ def get_data(url):
     except:
         return None
 
-# Sidebar - Settings
+# Sidebar
 st.sidebar.markdown("### ⚙️ Settings")
 default_id = 570479
 
@@ -76,20 +76,23 @@ def load_entry(team_id):
 def load_fixtures():
     return get_data("https://fantasy.premierleague.com/api/fixtures/")
 
-def try_load_squad(bootstrap, team_id):
-    if not bootstrap:
-        return set()
-    next_gw = 1
-    for event in bootstrap.get("events", []):
-        if event.get("is_next"):
-            next_gw = event["id"]
-            break
-    picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/{next_gw}/picks/")
-    if not picks_data or "picks" not in picks_data:
-        picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/1/picks/")
-    if picks_data and "picks" in picks_data and picks_data["picks"]:
-        return {pick["element"] for pick in picks_data["picks"]}
-    return set()
+def load_squad(team_id):
+    """Try to load squad for Gameweek 1 (and next GW as backup)."""
+    # First try Gameweek 1
+    data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/1/picks/")
+    if data and "picks" in data and data["picks"]:
+        return data
+
+    # Backup: try next gameweek
+    bootstrap = load_bootstrap()
+    if bootstrap:
+        for event in bootstrap.get("events", []):
+            if event.get("is_next"):
+                data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/{event['id']}/picks/")
+                if data and "picks" in data and data["picks"]:
+                    return data
+                break
+    return None
 
 bootstrap = load_bootstrap()
 entry = load_entry(TEAM_ID)
@@ -150,26 +153,29 @@ elif page == "Gameweek Info":
 
 elif page == "Squad":
     st.subheader("Your Squad")
+    st.caption("Trying to load your Gameweek 1 team...")
+
     if not bootstrap:
         st.error("Could not load player data.")
     else:
-        players = {p["id"]: p for p in bootstrap["elements"]}
-        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
-        positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-        owned_ids = try_load_squad(bootstrap, TEAM_ID)
-        if not owned_ids:
-            st.warning("Squad not available yet via the public API (common in pre-season).")
+        squad_data = load_squad(TEAM_ID)
+
+        if not squad_data:
+            st.warning(
+                "Your squad is not available yet from the official API.\n\n"
+                "This is normal in pre-season. The page is ready and will automatically "
+                "show your 15 players as soon as the data becomes available "
+                "(usually closer to the first deadline or when the season starts)."
+            )
         else:
-            next_gw = 1
-            for event in bootstrap.get("events", []):
-                if event.get("is_next"):
-                    next_gw = event["id"]
-                    break
-            picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/event/{next_gw}/picks/")
-            if not picks_data:
-                picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/event/1/picks/")
-            starters, bench = [], []
-            for pick in picks_data.get("picks", []):
+            players = {p["id"]: p for p in bootstrap["elements"]}
+            teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+            positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+
+            starters = []
+            bench = []
+
+            for pick in squad_data["picks"]:
                 p = players.get(pick["element"], {})
                 row = {
                     "Pos": positions.get(p.get("element_type"), "?"),
@@ -182,6 +188,8 @@ elif page == "Squad":
                     bench.append(row)
                 else:
                     starters.append(row)
+
+            st.success("Squad loaded successfully!")
             st.markdown("**Starting XI**")
             st.dataframe(starters, use_container_width=True, hide_index=True)
             st.markdown("**Bench**")
@@ -327,8 +335,10 @@ elif page == "Transfer Suggestions":
     else:
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-        owned_ids = try_load_squad(bootstrap, TEAM_ID)
-        if owned_ids:
+        owned_ids = set()
+        squad_data = load_squad(TEAM_ID)
+        if squad_data and "picks" in squad_data:
+            owned_ids = {pick["element"] for pick in squad_data["picks"]}
             st.success(f"Loaded squad ({len(owned_ids)} players). Suggestions exclude owned players.")
         else:
             st.info("Could not load squad yet (normal in pre-season). Showing general suggestions.")
