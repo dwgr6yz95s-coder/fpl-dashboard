@@ -92,9 +92,8 @@ col4.metric("Transfers", "0/∞")
 
 st.divider()
 
-# ---------- HELPER: Valid formation check ----------
+# ---------- HELPER: Valid formation ----------
 def is_valid_formation(starters):
-    """Check if Starting XI follows FPL rules."""
     counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
     for p in starters:
         counts[p["Pos"]] += 1
@@ -167,16 +166,13 @@ elif page == "Squad":
         pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
         limits = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
 
-        # Initialize saved squad
         if "saved_squad" not in st.session_state:
-            st.session_state.saved_squad = []   # list of player IDs
+            st.session_state.saved_squad = []
 
         # ---------- ADD PLAYERS BY POSITION ----------
         st.markdown("### Add Players")
-
         pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
 
-        # Build options only for that position
         options = []
         option_ids = {}
         for p in bootstrap["elements"]:
@@ -192,22 +188,20 @@ elif page == "Squad":
             max_selections=limits[pos_choice]
         )
 
-        # Merge with existing squad from other positions
-        current_ids = set(st.session_state.saved_squad)
-        # Remove any of this position that are no longer selected
-        for pid in list(current_ids):
-            if players_by_id.get(pid, {}).get("element_type") and pos_map[players_by_id[pid]["element_type"]] == pos_choice:
-                if option_ids.get(next((l for l, i in option_ids.items() if i == pid), None)) not in [option_ids[s] for s in selected]:
-                    current_ids.discard(pid)
-
-        # Add newly selected
+        # Rebuild working list
+        current_ids = set()
+        # Keep players from other positions
+        for pid in st.session_state.saved_squad:
+            p = players_by_id.get(pid)
+            if p and pos_map[p["element_type"]] != pos_choice:
+                current_ids.add(pid)
+        # Add selected from current position
         for label in selected:
             current_ids.add(option_ids[label])
 
-        # Temporary working list
         working_squad = list(current_ids)
 
-        # Show current counts
+        # Counts
         counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
         for pid in working_squad:
             p = players_by_id.get(pid)
@@ -219,7 +213,6 @@ elif page == "Squad":
         col1, col2 = st.columns(2)
         with col1:
             if st.button("💾 Save Team", type="primary"):
-                # Enforce max limits
                 final = []
                 temp_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
                 for pid in working_squad:
@@ -233,7 +226,6 @@ elif page == "Squad":
                 st.session_state.saved_squad = final
                 st.success("Team saved!")
                 st.rerun()
-
         with col2:
             if st.button("Clear Squad"):
                 st.session_state.saved_squad = []
@@ -242,9 +234,23 @@ elif page == "Squad":
         # ---------- DISPLAY SAVED SQUAD ----------
         if st.session_state.saved_squad:
             st.markdown("---")
-            st.markdown(f"### Saved Squad ({len(st.session_state.saved_squad)}/15)")
 
-            # Build full player rows
+            # Calculate value & bank
+            total_value = 0.0
+            for pid in st.session_state.saved_squad:
+                p = players_by_id.get(pid)
+                if p:
+                    total_value += p["now_cost"] / 10
+            bank = 100.0 - total_value
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Squad Value", f"£{total_value:.1f}m")
+            c2.metric("In the Bank", f"£{bank:.1f}m")
+            c3.metric("Players", f"{len(st.session_state.saved_squad)}/15")
+
+            st.markdown(f"### Saved Squad")
+
+            # Build rows
             all_rows = []
             for pid in st.session_state.saved_squad:
                 p = players_by_id.get(pid, {})
@@ -256,13 +262,32 @@ elif page == "Squad":
                     "Price": round(p.get("now_cost", 0) / 10, 1)
                 })
 
-            # Simple ordering: GKP first, then DEF, MID, FWD
-            order = {"GKP": 0, "DEF": 1, "MID": 2, "FWD": 3}
-            all_rows.sort(key=lambda x: (order.get(x["Pos"], 9), x["Player"]))
+            # Smart Starting XI selection
+            gk_list = [r for r in all_rows if r["Pos"] == "GKP"]
+            outfield = [r for r in all_rows if r["Pos"] != "GKP"]
 
-            # Starting XI = first 11 in this order (user can improve later)
-            starters = all_rows[:11]
-            bench = all_rows[11:]
+            # Sort outfield: DEF → MID → FWD
+            order = {"DEF": 0, "MID": 1, "FWD": 2}
+            outfield.sort(key=lambda x: (order.get(x["Pos"], 9), x["Player"]))
+
+            starters = []
+            bench = []
+
+            # Exactly 1 GK in starters
+            if gk_list:
+                starters.append(gk_list[0])
+                bench.extend(gk_list[1:])  # extra GKs to bench
+            else:
+                st.warning("No goalkeeper in squad!")
+
+            # Fill remaining 10 spots with outfield players
+            starters.extend(outfield[:10])
+            bench.extend(outfield[10:])
+
+            # Final safety: if somehow more than 11, trim
+            if len(starters) > 11:
+                bench = starters[11:] + bench
+                starters = starters[:11]
 
             valid, formation_msg = is_valid_formation(starters)
 
