@@ -326,7 +326,6 @@ elif page == "Squad":
                     import json
                     data = json.load(uploaded_file)
                     st.session_state.saved_squad = data.get("saved_squad", [])
-                    
 
         # Live working list
         if "working_squad" not in st.session_state:
