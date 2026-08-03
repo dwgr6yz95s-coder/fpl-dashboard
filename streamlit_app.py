@@ -428,7 +428,50 @@ elif page == "Squad":
                 st.success(f"Valid formation: **{formation_msg}**")
             else:
                 st.error(f"Invalid Starting XI: {formation_msg if len(starters)==11 else 'Must have exactly 11 players'}")
+                
+            # ---------- VISUAL PITCH ----------
+            st.markdown("### Pitch View")
+            
+            # Group starters by position
+            gk = [r for r in starters if r["Pos"] == "GKP"]
+            defs = [r for r in starters if r["Pos"] == "DEF"]
+            mids = [r for r in starters if r["Pos"] == "MID"]
+            fwds = [r for r in starters if r["Pos"] == "FWD"]
 
+            def player_card(p):
+                is_c = st.session_state.captain == p["id"]
+                is_v = st.session_state.vice == p["id"]
+                badge = " (C)" if is_c else (" (V)" if is_v else "")
+                return f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \nFDR {p['Next FDR']}"
+
+            # GK row
+            if gk:
+                cols = st.columns([1, 1, 1])
+                with cols[1]:
+                    st.info(player_card(gk[0]))
+
+            # DEF row
+            if defs:
+                cols = st.columns(len(defs))
+                for i, p in enumerate(defs):
+                    with cols[i]:
+                        st.info(player_card(p))
+
+            # MID row
+            if mids:
+                cols = st.columns(len(mids))
+                for i, p in enumerate(mids):
+                    with cols[i]:
+                        st.info(player_card(p))
+
+            # FWD row
+            if fwds:
+                cols = st.columns(len(fwds))
+                for i, p in enumerate(fwds):
+                    with cols[i]:
+                        st.info(player_card(p))
+
+            st.caption("Captain (C) and Vice (V) are marked. Use the list below to change positions or captain.")
             if st.button("🤖 Auto-select Captain (best potential for next GW)"):
                 if starters:
                     best = max(starters, key=lambda x: x["Potential"])
