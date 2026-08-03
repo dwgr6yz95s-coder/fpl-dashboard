@@ -429,7 +429,7 @@ elif page == "Squad":
             else:
                 st.error(f"Invalid Starting XI: {formation_msg if len(starters)==11 else 'Must have exactly 11 players'}")
                 
-                 # ---------- VISUAL PITCH ----------
+                           # ---------- VISUAL PITCH ----------
             st.markdown("### Pitch View")
 
             # Group starters by position
@@ -438,56 +438,89 @@ elif page == "Squad":
             mids = [r for r in starters if r["Pos"] == "MID"]
             fwds = [r for r in starters if r["Pos"] == "FWD"]
 
-            def player_card(p, is_bench=False):
+            def player_card(p, show_sub_button=False):
                 is_c = st.session_state.captain == p["id"]
                 is_v = st.session_state.vice == p["id"]
-                
-                badge = ""
+
+                badge = " ©️" if is_c else (" ⓥ" if is_v else "")
+                card = f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \nFDR {p['Next FDR']}"
+
                 if is_c:
-                    badge = " ©️"
+                    st.success(card)
                 elif is_v:
-                    badge = " ⓥ"
-                
-                # Try to show a simple fixture hint
-                fixture_text = f"FDR {p['Next FDR']}"
-                
-                card = f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \n{fixture_text}"
-                
-                if is_c:
-                    st.success(card)          # green for captain
-                elif is_v:
-                    st.warning(card)          # yellow/orange for vice
+                    st.warning(card)
                 else:
-                    st.info(card)             # normal blue
+                    st.info(card)
+
+                # Substitute button
+                if show_sub_button and bench:
+                    if st.button("⇄ Sub", key=f"sub_{p['id']}", use_container_width=True):
+                        st.session_state.sub_player = p["id"]
+
+            # Track who we want to substitute
+            if "sub_player" not in st.session_state:
+                st.session_state.sub_player = None
 
             # GK
             if gk:
                 c1, c2, c3 = st.columns([1.2, 1, 1.2])
                 with c2:
-                    player_card(gk[0])
+                    player_card(gk[0], show_sub_button=True)
 
             # DEF
             if defs:
                 cols = st.columns(len(defs))
                 for i, p in enumerate(defs):
                     with cols[i]:
-                        player_card(p)
+                        player_card(p, show_sub_button=True)
 
             # MID
             if mids:
                 cols = st.columns(len(mids))
                 for i, p in enumerate(mids):
                     with cols[i]:
-                        player_card(p)
+                        player_card(p, show_sub_button=True)
 
             # FWD
             if fwds:
                 cols = st.columns(len(fwds))
                 for i, p in enumerate(fwds):
                     with cols[i]:
-                        player_card(p)
+                        player_card(p, show_sub_button=True)
 
             st.caption("©️ = Captain   ·   ⓥ = Vice-Captain")
+
+            # ---------- SUBSTITUTE UI ----------
+            if st.session_state.sub_player:
+                outgoing = next((r for r in starters if r["id"] == st.session_state.sub_player), None)
+                if outgoing:
+                    st.markdown("---")
+                    st.markdown(f"**Substitute:** {outgoing['Player']} ({outgoing['Pos']})")
+
+                    bench_options = {f"{b['Player']} ({b['Pos']}) - £{b['Price']}m": b["id"] for b in bench}
+                    chosen = st.selectbox("Choose bench player to bring on", ["— Select player —"] + list(bench_options.keys()))
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Confirm Swap", type="primary") and chosen != "— Select player —":
+                            incoming_id = bench_options[chosen]
+                            # Perform the swap
+                            st.session_state.starting_xi.remove(st.session_state.sub_player)
+                            st.session_state.starting_xi.append(incoming_id)
+
+                            # Clear captain/vice if they were subbed off
+                            if st.session_state.captain == st.session_state.sub_player:
+                                st.session_state.captain = None
+                            if st.session_state.vice == st.session_state.sub_player:
+                                st.session_state.vice = None
+
+                            st.session_state.sub_player = None
+                            st.success("Swap completed!")
+                            st.rerun()
+                    with col2:
+                        if st.button("Cancel"):
+                            st.session_state.sub_player = None
+                            st.rerun()
 
             # ---------- BENCH ----------
             st.markdown("#### Bench")
@@ -495,7 +528,7 @@ elif page == "Squad":
                 cols = st.columns(len(bench))
                 for i, p in enumerate(bench):
                     with cols[i]:
-                        player_card(p, is_bench=True)
+                        player_card(p, show_sub_button=False)
             else:
                 st.caption("No players on the bench")
 
