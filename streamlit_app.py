@@ -334,8 +334,16 @@ elif page == "Squad":
                 except Exception as e:
                     st.error(f"Could not load file: {e}")
 
-        st.markdown("### 1. Build your 15-man squad")
+                st.markdown("### 1. Build your 15-man squad")
+
+        # Live working list
+        if "working_squad" not in st.session_state:
+            st.session_state.working_squad = list(st.session_state.saved_squad)
+
         pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
+
+        # Players already selected for other positions
+        already_selected = set(st.session_state.working_squad)
 
         options = []
         option_ids = {}
@@ -345,44 +353,76 @@ elif page == "Squad":
                 options.append(label)
                 option_ids[label] = p["id"]
 
+        # Pre-select players already in working_squad for this position
+        default_labels = [label for label, pid in option_ids.items() if pid in already_selected]
+
         selected = st.multiselect(
             f"Choose {pos_choice} players",
             options=options,
-            default=[label for label, pid in option_ids.items() if pid in st.session_state.saved_squad],
-            max_selections=limits[pos_choice]
+            default=default_labels,
+            max_selections=limits[pos_choice],
+            key=f"multi_{pos_choice}"
         )
 
-        current_ids = set()
-        for pid in st.session_state.saved_squad:
+        # Update working_squad for this position
+        # First remove any previous players of this position
+        new_working = []
+        for pid in st.session_state.working_squad:
             p = players_by_id.get(pid)
             if p and pos_map[p["element_type"]] != pos_choice:
-                current_ids.add(pid)
+                new_working.append(pid)
+
+        # Add the newly selected ones
         for label in selected:
-            current_ids.add(option_ids[label])
+            new_working.append(option_ids[label])
 
-        working_squad = list(current_ids)
+        st.session_state.working_squad = list(set(new_working))  # remove duplicates
 
+        # Live counts
         counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
-        for pid in working_squad:
+        team_counts = {}
+        for pid in st.session_state.working_squad:
             p = players_by_id.get(pid)
             if p:
-                counts[pos_map[p["element_type"]]] += 1
+                pos = pos_map[p["element_type"]]
+                counts[pos] += 1
+                team_id = p.get("team")
+                team_counts[team_id] = team_counts.get(team_id, 0) + 1
 
-        st.write(f"**Current counts:** GKP {counts['GKP']}/2 · DEF {counts['DEF']}/5 · MID {counts['MID']}/5 · FWD {counts['FWD']}/3  → Total {len(working_squad)}/15")
+        st.write(f"**Current counts:** GKP {counts['GKP']}/2 · DEF {counts['DEF']}/5 · MID {counts['MID']}/5 · FWD {counts['FWD']}/3  → **Total {len(st.session_state.working_squad)}/15**")
+
+        # Show teams that already have 3 players
+        full_teams = [teams.get(tid, "?") for tid, c in team_counts.items() if c >= 3]
+        if full_teams:
+            st.caption(f"Teams at max (3 players): {', '.join(full_teams)}")
 
         col1, col2 = st.columns(2)
         with col1:
             if st.button("💾 Save Squad", type="primary"):
-                final = []
-                temp_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
-                team_counts = {}
-
-                for pid in working_squad:
-                    p = players_by_id.get(pid)
-                    if not p:
-                        continue
-                    pos = pos_map[p["element_type"]]
-                    team_id = p.get("team")
+                # Final validation
+                if len(st.session_state.working_squad) != 15:
+                    st.error("You need exactly 15 players.")
+                elif counts["GKP"] != 2 or counts["DEF"] != 5 or counts["MID"] != 5 or counts["FWD"] != 3:
+                    st.error("Position counts must be exactly 2 GKP / 5 DEF / 5 MID / 3 FWD.")
+                elif any(c > 3 for c in team_counts.values()):
+                    st.error("Maximum 3 players from the same club.")
+                else:
+                    st.session_state.saved_squad = list(st.session_state.working_squad)
+                    st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
+                    if st.session_state.captain not in st.session_state.saved_squad:
+                        st.session_state.captain = None
+                    if st.session_state.vice not in st.session_state.saved_squad:
+                        st.session_state.vice = None
+                    st.success("Squad saved successfully!")
+                    st.rerun()
+        with col2:
+            if st.button("Clear Squad"):
+                st.session_state.saved_squad = []
+                st.session_state.working_squad = []
+                st.session_state.starting_xi = []
+                st.session_state.captain = None
+                st.session_state.vice = None
+                st.rerun()
 
                     # Position limit
                     if temp_counts[pos] >= limits[pos]:
