@@ -285,7 +285,43 @@ elif page == "Squad":
             st.session_state.captain = None
         if "vice" not in st.session_state:
             st.session_state.vice = None
+        # ---------- SAVE / LOAD SQUAD ----------
+        st.markdown("### Save / Load Squad")
+        col_save, col_load = st.columns(2)
 
+        with col_save:
+            if st.session_state.saved_squad:
+                import json
+                squad_data = {
+                    "saved_squad": st.session_state.saved_squad,
+                    "starting_xi": st.session_state.starting_xi,
+                    "captain": st.session_state.captain,
+                    "vice": st.session_state.vice
+                }
+                json_str = json.dumps(squad_data, indent=2)
+                st.download_button(
+                    label="⬇️ Download Squad",
+                    data=json_str,
+                    file_name="my_fpl_squad.json",
+                    mime="application/json"
+                )
+            else:
+                st.caption("Save a squad first to download it.")
+
+        with col_load:
+            uploaded_file = st.file_uploader("⬆️ Upload Squad JSON", type=["json"])
+            if uploaded_file is not None:
+                try:
+                    import json
+                    data = json.load(uploaded_file)
+                    st.session_state.saved_squad = data.get("saved_squad", [])
+                    st.session_state.starting_xi = data.get("starting_xi", [])
+                    st.session_state.captain = data.get("captain")
+                    st.session_state.vice = data.get("vice")
+                    st.success("Squad loaded successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not load file: {e}")
         st.markdown("### 1. Build your 15-man squad")
         pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
 
