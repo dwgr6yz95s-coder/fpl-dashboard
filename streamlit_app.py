@@ -163,7 +163,6 @@ page = st.sidebar.radio(
     ],
     label_visibility="collapsed"
 )
-)
 
 # ---------- LOAD DATA ----------
 bootstrap = load_bootstrap()
