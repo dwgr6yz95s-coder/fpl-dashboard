@@ -1,6 +1,12 @@
 import streamlit as st
-import requests
 from collections import defaultdict
+
+from api import (
+    load_bootstrap, load_entry, load_fixtures,
+    load_history, load_element_summary,
+    load_league_standings, load_dream_team
+)
+from helpers import is_valid_formation, make_row
 
 st.set_page_config(
     page_title="FPL Dashboard",
@@ -17,15 +23,6 @@ st.markdown("""
     h1 { font-weight: 700 !important; }
 </style>
 """, unsafe_allow_html=True)
-
-def get_data(url):
-    try:
-        response = requests.get(url, timeout=12)
-        if response.status_code == 200:
-            return response.json()
-        return None
-    except:
-        return None
 
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
@@ -67,35 +64,7 @@ page = st.sidebar.radio(
     label_visibility="collapsed"
 )
 
-# ---------- DATA ----------
-@st.cache_data(ttl=300)
-def load_bootstrap():
-    return get_data("https://fantasy.premierleague.com/api/bootstrap-static/")
-
-@st.cache_data(ttl=300)
-def load_entry(team_id):
-    return get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/")
-
-@st.cache_data(ttl=300)
-def load_fixtures():
-    return get_data("https://fantasy.premierleague.com/api/fixtures/")
-
-@st.cache_data(ttl=300)
-def load_history(team_id):
-    return get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/history/")
-
-@st.cache_data(ttl=300)
-def load_element_summary(player_id):
-    return get_data(f"https://fantasy.premierleague.com/api/element-summary/{player_id}/")
-
-@st.cache_data(ttl=300)
-def load_league_standings(league_id):
-    return get_data(f"https://fantasy.premierleague.com/api/leagues-classic/{league_id}/standings/")
-
-@st.cache_data(ttl=300)
-def load_dream_team(gw):
-    return get_data(f"https://fantasy.premierleague.com/api/dream-team/{gw}/")
-
+# ---------- LOAD DATA ----------
 bootstrap = load_bootstrap()
 entry = load_entry(TEAM_ID)
 fixtures = load_fixtures()
@@ -110,77 +79,6 @@ col3.metric("In the Bank", "£0.0m")
 col4.metric("Transfers", "0/∞")
 
 st.divider()
-
-# ---------- HELPERS ----------
-def is_valid_formation(starters):
-    counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
-    for p in starters:
-        counts[p["Pos"]] += 1
-    if counts["GKP"] != 1:
-        return False, "Must have exactly 1 Goalkeeper"
-    if counts["DEF"] < 3 or counts["DEF"] > 5:
-        return False, "Must have 3–5 Defenders"
-    if counts["MID"] < 2 or counts["MID"] > 5:
-        return False, "Must have 2–5 Midfielders"
-    if counts["FWD"] < 1 or counts["FWD"] > 3:
-        return False, "Must have 1–3 Forwards"
-    if counts["DEF"] + counts["MID"] + counts["FWD"] != 10:
-        return False, "Outfield players must total 10"
-    return True, f"{counts['DEF']}-{counts['MID']}-{counts['FWD']}"
-
-def get_next_fixture_difficulty(team_id, fixtures, bootstrap):
-    if not fixtures or not bootstrap:
-        return 3
-    next_gw = None
-    for event in bootstrap.get("events", []):
-        if event.get("is_next"):
-            next_gw = event["id"]
-            break
-    if not next_gw:
-        next_gw = 1
-    for fix in fixtures:
-        if fix.get("event") == next_gw:
-            if fix.get("team_h") == team_id:
-                return fix.get("team_h_difficulty", 3)
-            if fix.get("team_a") == team_id:
-                return fix.get("team_a_difficulty", 3)
-    return 3
-
-def potential_score(player, fixtures, bootstrap):
-    try:
-        form = float(player.get("form") or 0)
-    except:
-        form = 0
-    try:
-        ppg = float(player.get("points_per_game") or 0)
-    except:
-        ppg = 0
-    fdr = get_next_fixture_difficulty(player.get("team"), fixtures, bootstrap)
-    score = (form * 2.0) + (ppg * 1.5) + ((6 - fdr) * 3.0)
-    return round(score, 2), fdr
-
-def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
-    p = players_by_id.get(pid, {})
-    change = p.get("cost_change_event", 0)
-    change_str = ""
-    if change > 0:
-        change_str = f" ↑{change/10:.1f}"
-    elif change < 0:
-        change_str = f" ↓{abs(change)/10:.1f}"
-    score, fdr = potential_score(p, fixtures, bootstrap)
-    return {
-        "id": pid,
-        "Pos": pos_map.get(p.get("element_type"), "?"),
-        "Player": p.get("web_name", "Unknown"),
-        "Team": teams.get(p.get("team"), "?"),
-        "Price": round(p.get("now_cost", 0) / 10, 1),
-        "Change": change_str,
-        "Form": p.get("form", "0.0"),
-        "Points": p.get("total_points", 0),
-        "PPG": p.get("points_per_game", "0.0"),
-        "Next FDR": fdr,
-        "Potential": score
-    }
 
 # ---------- PAGES ----------
 if page == "Home":
@@ -247,13 +145,7 @@ elif page == "Manager History":
 
         if past:
             st.markdown("### Previous Seasons")
-            past_rows = []
-            for s in past:
-                past_rows.append({
-                    "Season": s.get("season_name"),
-                    "Points": s.get("total_points"),
-                    "Rank": s.get("rank")
-                })
+            past_rows = [{"Season": s.get("season_name"), "Points": s.get("total_points"), "Rank": s.get("rank")} for s in past]
             st.dataframe(past_rows, use_container_width=True, hide_index=True)
 
 elif page == "Gameweek Info":
@@ -500,18 +392,8 @@ elif page == "Mini-Leagues":
             if standings and "standings" in standings:
                 results = standings["standings"].get("results", [])
                 if results:
-                    rows = []
-                    for r in results[:25]:  # top 25
-                        rows.append({
-                            "Rank": r.get("rank"),
-                            "Team": r.get("entry_name"),
-                            "Manager": r.get("player_name"),
-                            "GW Points": r.get("event_total"),
-                            "Total": r.get("total")
-                        })
+                    rows = [{"Rank": r.get("rank"), "Team": r.get("entry_name"), "Manager": r.get("player_name"), "GW Points": r.get("event_total"), "Total": r.get("total")} for r in results[:25]]
                     st.dataframe(rows, use_container_width=True, hide_index=True)
-                    if standings["standings"].get("has_next"):
-                        st.caption("Showing first page of standings.")
                 else:
                     st.info("No standings available yet (common in pre-season).")
             else:
@@ -663,7 +545,6 @@ elif page == "Player Detail":
             c4.metric("Selected by", f"{player.get('selected_by_percent', '-')}%")
 
             if summary:
-                # Upcoming fixtures
                 upcoming = summary.get("fixtures", [])
                 if upcoming:
                     st.markdown("### Upcoming Fixtures")
@@ -678,41 +559,23 @@ elif page == "Player Detail":
                         })
                     st.dataframe(fix_rows, use_container_width=True, hide_index=True)
 
-                # This season history
                 history = summary.get("history", [])
                 if history:
                     st.markdown("### This Season (Gameweek History)")
-                    hist_rows = []
-                    for h in history:
-                        hist_rows.append({
-                            "GW": h.get("round"),
-                            "Points": h.get("total_points"),
-                            "Minutes": h.get("minutes"),
-                            "Goals": h.get("goals_scored"),
-                            "Assists": h.get("assists"),
-                            "CS": h.get("clean_sheets"),
-                            "Bonus": h.get("bonus"),
-                            "Value": round(h.get("value", 0) / 10, 1)
-                        })
+                    hist_rows = [{"GW": h.get("round"), "Points": h.get("total_points"), "Minutes": h.get("minutes"),
+                                  "Goals": h.get("goals_scored"), "Assists": h.get("assists"), "CS": h.get("clean_sheets"),
+                                  "Bonus": h.get("bonus"), "Value": round(h.get("value", 0) / 10, 1)} for h in history]
                     st.dataframe(hist_rows, use_container_width=True, hide_index=True)
                 else:
                     st.info("No gameweek history yet for this player.")
 
-                # Past seasons
                 past = summary.get("history_past", [])
                 if past:
                     st.markdown("### Previous Seasons")
-                    past_rows = []
-                    for s in past:
-                        past_rows.append({
-                            "Season": s.get("season_name"),
-                            "Points": s.get("total_points"),
-                            "Minutes": s.get("minutes"),
-                            "Goals": s.get("goals_scored"),
-                            "Assists": s.get("assists"),
-                            "Start Price": round(s.get("start_cost", 0) / 10, 1),
-                            "End Price": round(s.get("end_cost", 0) / 10, 1)
-                        })
+                    past_rows = [{"Season": s.get("season_name"), "Points": s.get("total_points"), "Minutes": s.get("minutes"),
+                                  "Goals": s.get("goals_scored"), "Assists": s.get("assists"),
+                                  "Start Price": round(s.get("start_cost", 0) / 10, 1),
+                                  "End Price": round(s.get("end_cost", 0) / 10, 1)} for s in past]
                     st.dataframe(past_rows, use_container_width=True, hide_index=True)
             else:
                 st.warning("Could not load detailed data for this player.")
@@ -723,14 +586,9 @@ elif page == "Dream Team":
     if not bootstrap:
         st.error("Could not load data.")
     else:
-        # Find available GWs (prefer finished ones, fallback to 1)
-        available_gws = []
-        for event in bootstrap.get("events", []):
-            if event.get("finished") or event.get("is_current") or event.get("id") == 1:
-                available_gws.append(event["id"])
+        available_gws = [e["id"] for e in bootstrap.get("events", []) if e.get("finished") or e.get("is_current") or e.get("id") == 1]
         if not available_gws:
             available_gws = [1]
-
         gw = st.selectbox("Select Gameweek", available_gws, index=len(available_gws)-1)
         dream = load_dream_team(gw)
 
@@ -740,9 +598,7 @@ elif page == "Dream Team":
             teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
             players = {p["id"]: p for p in bootstrap["elements"]}
             pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-
             st.metric("Total Points", dream.get("team_points", "-"))
-
             rows = []
             for pick in dream.get("team", []):
                 pid = pick.get("element")
