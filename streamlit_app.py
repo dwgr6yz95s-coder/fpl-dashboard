@@ -321,12 +321,25 @@ elif page == "Squad":
                 type=["json"],
                 label_visibility="collapsed"
             )
-            if uploaded_file is not None:
+                       if uploaded_file is not None:
                 try:
                     import json
                     data = json.load(uploaded_file)
                     st.session_state.saved_squad = data.get("saved_squad", [])
+                    st.session_state.starting_xi = data.get("starting_xi", [])
+                    st.session_state.captain = data.get("captain")
+                    st.session_state.vice = data.get("vice")
+                    st.success("Squad loaded!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not load file: {e}")
 
+        # ---------- NOW the build section starts ----------
+        st.markdown("### 1. Build your 15-man squad")
+
+        if "working_squad" not in st.session_state:
+            st.session_state.working_squad = list(st.session_state.saved_squad)
+        ...
         # Live working list
         if "working_squad" not in st.session_state:
             st.session_state.working_squad = list(st.session_state.saved_squad)
