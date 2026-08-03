@@ -27,7 +27,7 @@ def get_data(url):
     except:
         return None
 
-# Sidebar
+# ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
 default_id = 570479
 
@@ -64,6 +64,7 @@ page = st.sidebar.radio(
     label_visibility="collapsed"
 )
 
+# ---------- DATA ----------
 @st.cache_data(ttl=300)
 def load_bootstrap():
     return get_data("https://fantasy.premierleague.com/api/bootstrap-static/")
@@ -90,6 +91,26 @@ col3.metric("In the Bank", "£0.0m")
 col4.metric("Transfers", "0/∞")
 
 st.divider()
+
+# ---------- HELPER: Valid formation check ----------
+def is_valid_formation(starters):
+    """Check if Starting XI follows FPL rules."""
+    counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
+    for p in starters:
+        counts[p["Pos"]] += 1
+
+    if counts["GKP"] != 1:
+        return False, "Must have exactly 1 Goalkeeper"
+    if counts["DEF"] < 3 or counts["DEF"] > 5:
+        return False, "Must have 3–5 Defenders"
+    if counts["MID"] < 2 or counts["MID"] > 5:
+        return False, "Must have 2–5 Midfielders"
+    if counts["FWD"] < 1 or counts["FWD"] > 3:
+        return False, "Must have 1–3 Forwards"
+    if counts["DEF"] + counts["MID"] + counts["FWD"] != 10:
+        return False, "Outfield players must total 10"
+
+    return True, f"{counts['DEF']}-{counts['MID']}-{counts['FWD']}"
 
 # ---------- PAGES ----------
 if page == "Home":
@@ -136,71 +157,136 @@ elif page == "Gameweek Info":
 
 elif page == "Squad":
     st.subheader("Your Squad")
-    st.caption("Build your squad manually until the official data becomes available.")
+    st.caption("Build a valid 15-man squad. Rules: 2 GKP · 5 DEF · 5 MID · 3 FWD")
 
     if not bootstrap:
         st.error("Could not load player data.")
     else:
-        players = {p["id"]: p for p in bootstrap["elements"]}
+        players_by_id = {p["id"]: p for p in bootstrap["elements"]}
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
-        positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        limits = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
 
-        # Create a nice label for each player
-        player_options = {}
+        # Initialize saved squad
+        if "saved_squad" not in st.session_state:
+            st.session_state.saved_squad = []   # list of player IDs
+
+        # ---------- ADD PLAYERS BY POSITION ----------
+        st.markdown("### Add Players")
+
+        pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
+
+        # Build options only for that position
+        options = []
+        option_ids = {}
         for p in bootstrap["elements"]:
-            label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - £{p['now_cost']/10:.1f}m"
-            player_options[label] = p["id"]
+            if pos_map[p["element_type"]] == pos_choice:
+                label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - £{p['now_cost']/10:.1f}m"
+                options.append(label)
+                option_ids[label] = p["id"]
 
-        # Initialize session state for manual squad
-        if "manual_squad" not in st.session_state:
-            st.session_state.manual_squad = []
-
-        # Add players
-        selected_labels = st.multiselect(
-            "Search and add players to your squad (max 15)",
-            options=list(player_options.keys()),
-            default=[label for label, pid in player_options.items() if pid in st.session_state.manual_squad],
-            max_selections=15
+        selected = st.multiselect(
+            f"Choose {pos_choice} players",
+            options=options,
+            default=[label for label, pid in option_ids.items() if pid in st.session_state.saved_squad],
+            max_selections=limits[pos_choice]
         )
 
-        # Update session state
-        st.session_state.manual_squad = [player_options[label] for label in selected_labels]
+        # Merge with existing squad from other positions
+        current_ids = set(st.session_state.saved_squad)
+        # Remove any of this position that are no longer selected
+        for pid in list(current_ids):
+            if players_by_id.get(pid, {}).get("element_type") and pos_map[players_by_id[pid]["element_type"]] == pos_choice:
+                if option_ids.get(next((l for l, i in option_ids.items() if i == pid), None)) not in [option_ids[s] for s in selected]:
+                    current_ids.discard(pid)
 
-        col_a, col_b = st.columns([1, 3])
-        with col_a:
-            if st.button("Clear Squad"):
-                st.session_state.manual_squad = []
+        # Add newly selected
+        for label in selected:
+            current_ids.add(option_ids[label])
+
+        # Temporary working list
+        working_squad = list(current_ids)
+
+        # Show current counts
+        counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
+        for pid in working_squad:
+            p = players_by_id.get(pid)
+            if p:
+                counts[pos_map[p["element_type"]]] += 1
+
+        st.write(f"**Current counts:** GKP {counts['GKP']}/2 · DEF {counts['DEF']}/5 · MID {counts['MID']}/5 · FWD {counts['FWD']}/3  → Total {len(working_squad)}/15")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 Save Team", type="primary"):
+                # Enforce max limits
+                final = []
+                temp_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
+                for pid in working_squad:
+                    p = players_by_id.get(pid)
+                    if not p:
+                        continue
+                    pos = pos_map[p["element_type"]]
+                    if temp_counts[pos] < limits[pos]:
+                        final.append(pid)
+                        temp_counts[pos] += 1
+                st.session_state.saved_squad = final
+                st.success("Team saved!")
                 st.rerun()
 
-        # Display current manual squad
-        if st.session_state.manual_squad:
+        with col2:
+            if st.button("Clear Squad"):
+                st.session_state.saved_squad = []
+                st.rerun()
+
+        # ---------- DISPLAY SAVED SQUAD ----------
+        if st.session_state.saved_squad:
             st.markdown("---")
-            st.markdown(f"**Your Manual Squad** ({len(st.session_state.manual_squad)}/15 players)")
+            st.markdown(f"### Saved Squad ({len(st.session_state.saved_squad)}/15)")
 
-            starters = []
-            bench = []
-
-            for i, pid in enumerate(st.session_state.manual_squad):
-                p = players.get(pid, {})
-                row = {
-                    "Pos": positions.get(p.get("element_type"), "?"),
+            # Build full player rows
+            all_rows = []
+            for pid in st.session_state.saved_squad:
+                p = players_by_id.get(pid, {})
+                all_rows.append({
+                    "id": pid,
+                    "Pos": pos_map.get(p.get("element_type"), "?"),
                     "Player": p.get("web_name", "Unknown"),
                     "Team": teams.get(p.get("team"), "?"),
                     "Price": round(p.get("now_cost", 0) / 10, 1)
-                }
-                if i < 11:
-                    starters.append(row)
-                else:
-                    bench.append(row)
+                })
 
-            st.markdown("**Starting XI** (first 11 players you selected)")
-            st.dataframe(starters, use_container_width=True, hide_index=True)
+            # Simple ordering: GKP first, then DEF, MID, FWD
+            order = {"GKP": 0, "DEF": 1, "MID": 2, "FWD": 3}
+            all_rows.sort(key=lambda x: (order.get(x["Pos"], 9), x["Player"]))
+
+            # Starting XI = first 11 in this order (user can improve later)
+            starters = all_rows[:11]
+            bench = all_rows[11:]
+
+            valid, formation_msg = is_valid_formation(starters)
+
+            if valid:
+                st.success(f"Valid formation: **{formation_msg}**")
+            else:
+                st.error(f"Invalid Starting XI: {formation_msg}")
+
+            st.markdown("**Starting XI**")
+            st.dataframe(
+                [{"Pos": r["Pos"], "Player": r["Player"], "Team": r["Team"], "Price": r["Price"]} for r in starters],
+                use_container_width=True,
+                hide_index=True
+            )
 
             if bench:
                 st.markdown("**Bench**")
-                st.dataframe(bench, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    [{"Pos": r["Pos"], "Player": r["Player"], "Team": r["Team"], "Price": r["Price"]} for r in bench],
+                    use_container_width=True,
+                    hide_index=True
+                )
         else:
-            st.info("No players selected yet. Use the search box above to build your squad.")
+            st.info("No players saved yet. Add players by position above, then click **Save Team**.")
 
 elif page == "Mini-Leagues":
     st.subheader("Mini-Leagues")
@@ -336,18 +422,17 @@ elif page == "Players - Easiest Fixtures":
 
 elif page == "Transfer Suggestions":
     st.subheader("Transfer Suggestions")
-    st.caption("Uses your manual squad when available. Not financial advice.")
+    st.caption("Uses your saved squad when available. Not financial advice.")
     if not bootstrap or not fixtures:
         st.error("Could not load data.")
     else:
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-
-        owned_ids = set(st.session_state.get("manual_squad", []))
+        owned_ids = set(st.session_state.get("saved_squad", []))
         if owned_ids:
-            st.success(f"Using your manual squad ({len(owned_ids)} players). Suggestions exclude them.")
+            st.success(f"Using your saved squad ({len(owned_ids)} players). Suggestions exclude them.")
         else:
-            st.info("No manual squad set. Showing general suggestions. Build a squad on the Squad page for better results.")
+            st.info("No saved squad yet. Build one on the Squad page for better suggestions.")
 
         next_gws = []
         for event in bootstrap.get("events", []):
