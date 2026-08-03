@@ -76,24 +76,6 @@ def load_entry(team_id):
 def load_fixtures():
     return get_data("https://fantasy.premierleague.com/api/fixtures/")
 
-def load_squad(team_id):
-    """Try to load squad for Gameweek 1 (and next GW as backup)."""
-    # First try Gameweek 1
-    data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/1/picks/")
-    if data and "picks" in data and data["picks"]:
-        return data
-
-    # Backup: try next gameweek
-    bootstrap = load_bootstrap()
-    if bootstrap:
-        for event in bootstrap.get("events", []):
-            if event.get("is_next"):
-                data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/{event['id']}/picks/")
-                if data and "picks" in data and data["picks"]:
-                    return data
-                break
-    return None
-
 bootstrap = load_bootstrap()
 entry = load_entry(TEAM_ID)
 fixtures = load_fixtures()
@@ -109,6 +91,7 @@ col4.metric("Transfers", "0/∞")
 
 st.divider()
 
+# ---------- PAGES ----------
 if page == "Home":
     st.subheader("Dashboard Overview")
     if bootstrap:
@@ -153,47 +136,71 @@ elif page == "Gameweek Info":
 
 elif page == "Squad":
     st.subheader("Your Squad")
-    st.caption("Trying to load your Gameweek 1 team...")
+    st.caption("Build your squad manually until the official data becomes available.")
 
     if not bootstrap:
         st.error("Could not load player data.")
     else:
-        squad_data = load_squad(TEAM_ID)
+        players = {p["id"]: p for p in bootstrap["elements"]}
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 
-        if not squad_data:
-            st.warning(
-                "Your squad is not available yet from the official API.\n\n"
-                "This is normal in pre-season. The page is ready and will automatically "
-                "show your 15 players as soon as the data becomes available "
-                "(usually closer to the first deadline or when the season starts)."
-            )
-        else:
-            players = {p["id"]: p for p in bootstrap["elements"]}
-            teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
-            positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        # Create a nice label for each player
+        player_options = {}
+        for p in bootstrap["elements"]:
+            label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - £{p['now_cost']/10:.1f}m"
+            player_options[label] = p["id"]
+
+        # Initialize session state for manual squad
+        if "manual_squad" not in st.session_state:
+            st.session_state.manual_squad = []
+
+        # Add players
+        selected_labels = st.multiselect(
+            "Search and add players to your squad (max 15)",
+            options=list(player_options.keys()),
+            default=[label for label, pid in player_options.items() if pid in st.session_state.manual_squad],
+            max_selections=15
+        )
+
+        # Update session state
+        st.session_state.manual_squad = [player_options[label] for label in selected_labels]
+
+        col_a, col_b = st.columns([1, 3])
+        with col_a:
+            if st.button("Clear Squad"):
+                st.session_state.manual_squad = []
+                st.rerun()
+
+        # Display current manual squad
+        if st.session_state.manual_squad:
+            st.markdown("---")
+            st.markdown(f"**Your Manual Squad** ({len(st.session_state.manual_squad)}/15 players)")
 
             starters = []
             bench = []
 
-            for pick in squad_data["picks"]:
-                p = players.get(pick["element"], {})
+            for i, pid in enumerate(st.session_state.manual_squad):
+                p = players.get(pid, {})
                 row = {
                     "Pos": positions.get(p.get("element_type"), "?"),
                     "Player": p.get("web_name", "Unknown"),
                     "Team": teams.get(p.get("team"), "?"),
-                    "Price": round(p.get("now_cost", 0) / 10, 1),
-                    "Status": "C" if pick.get("is_captain") else ("V" if pick.get("is_vice_captain") else "")
+                    "Price": round(p.get("now_cost", 0) / 10, 1)
                 }
-                if pick.get("multiplier", 1) == 0:
-                    bench.append(row)
-                else:
+                if i < 11:
                     starters.append(row)
+                else:
+                    bench.append(row)
 
-            st.success("Squad loaded successfully!")
-            st.markdown("**Starting XI**")
+            st.markdown("**Starting XI** (first 11 players you selected)")
             st.dataframe(starters, use_container_width=True, hide_index=True)
-            st.markdown("**Bench**")
-            st.dataframe(bench, use_container_width=True, hide_index=True)
+
+            if bench:
+                st.markdown("**Bench**")
+                st.dataframe(bench, use_container_width=True, hide_index=True)
+        else:
+            st.info("No players selected yet. Use the search box above to build your squad.")
 
 elif page == "Mini-Leagues":
     st.subheader("Mini-Leagues")
@@ -329,19 +336,19 @@ elif page == "Players - Easiest Fixtures":
 
 elif page == "Transfer Suggestions":
     st.subheader("Transfer Suggestions")
-    st.caption("Uses the entered Team ID when possible. Not financial advice.")
+    st.caption("Uses your manual squad when available. Not financial advice.")
     if not bootstrap or not fixtures:
         st.error("Could not load data.")
     else:
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-        owned_ids = set()
-        squad_data = load_squad(TEAM_ID)
-        if squad_data and "picks" in squad_data:
-            owned_ids = {pick["element"] for pick in squad_data["picks"]}
-            st.success(f"Loaded squad ({len(owned_ids)} players). Suggestions exclude owned players.")
+
+        owned_ids = set(st.session_state.get("manual_squad", []))
+        if owned_ids:
+            st.success(f"Using your manual squad ({len(owned_ids)} players). Suggestions exclude them.")
         else:
-            st.info("Could not load squad yet (normal in pre-season). Showing general suggestions.")
+            st.info("No manual squad set. Showing general suggestions. Build a squad on the Squad page for better results.")
+
         next_gws = []
         for event in bootstrap.get("events", []):
             if event.get("is_next") or (next_gws and len(next_gws) < 5):
@@ -350,13 +357,16 @@ elif page == "Transfer Suggestions":
                     break
         if not next_gws:
             next_gws = [1, 2, 3, 4, 5]
+
         team_fdr = defaultdict(list)
         for fix in fixtures:
             gw = fix.get("event")
             if gw in next_gws:
                 team_fdr[fix["team_h"]].append(fix.get("team_h_difficulty", 3))
                 team_fdr[fix["team_a"]].append(fix.get("team_a_difficulty", 3))
+
         team_avg = {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
+
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             max_price = st.slider("Max price (£m)", 4.0, 15.0, 8.5, 0.5)
@@ -366,9 +376,11 @@ elif page == "Transfer Suggestions":
             min_owned = st.slider("Min ownership %", 0.0, 30.0, 2.0, 0.5)
         with c4:
             sort_by = st.selectbox("Sort by", ["Easiest fixtures", "Highest ownership", "Lowest price"])
+
         pos_choice = st.selectbox("Position", ["All", "Goalkeepers", "Defenders", "Midfielders", "Forwards"])
         pos_map = {"Goalkeepers": 1, "Defenders": 2, "Midfielders": 3, "Forwards": 4}
         selected_pos = pos_map.get(pos_choice)
+
         suggestions = []
         for p in bootstrap.get("elements", []):
             if p["id"] in owned_ids:
@@ -388,12 +400,14 @@ elif page == "Transfer Suggestions":
                     "Selected %": owned,
                     "Form": p.get("form", "-")
                 })
+
         if sort_by == "Easiest fixtures":
             suggestions = sorted(suggestions, key=lambda x: (x["Avg FDR"], -x["Selected %"]))
         elif sort_by == "Highest ownership":
             suggestions = sorted(suggestions, key=lambda x: -x["Selected %"])
         else:
             suggestions = sorted(suggestions, key=lambda x: x["Price"])
+
         suggestions = suggestions[:25]
         if suggestions:
             st.dataframe(suggestions, use_container_width=True, hide_index=True)
