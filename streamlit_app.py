@@ -2,10 +2,8 @@ import streamlit as st
 import requests
 from collections import defaultdict
 
-TEAM_ID = 570479
-
 st.set_page_config(
-    page_title="FC Snus FPL Dashboard",
+    page_title="FPL Dashboard",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -20,43 +18,60 @@ def get_data(url):
     except:
         return None
 
+# ---------- SIDEBAR: Team ID Input ----------
+st.sidebar.title("Settings")
+default_id = 570479
+
+team_id_input = st.sidebar.text_input(
+    "Your FPL Team ID",
+    value=str(st.session_state.get("team_id", default_id)),
+    help="Find it in the URL when you view your points page (e.g. /entry/1234567/)"
+)
+
+# Validate and store
+try:
+    TEAM_ID = int(team_id_input.strip())
+    st.session_state["team_id"] = TEAM_ID
+except:
+    TEAM_ID = default_id
+    st.sidebar.error("Please enter a valid number")
+
+st.sidebar.caption("Anyone can enter their own Team ID to see their data.")
+
+# ---------- Data loading ----------
 @st.cache_data(ttl=300)
 def load_bootstrap():
     return get_data("https://fantasy.premierleague.com/api/bootstrap-static/")
 
 @st.cache_data(ttl=300)
-def load_entry():
-    return get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/")
+def load_entry(team_id):
+    return get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/")
 
 @st.cache_data(ttl=300)
 def load_fixtures():
     return get_data("https://fantasy.premierleague.com/api/fixtures/")
 
-def try_load_squad(bootstrap):
-    """Try to load the user's squad. Returns a set of player IDs if successful."""
+def try_load_squad(bootstrap, team_id):
     if not bootstrap:
         return set()
-
     next_gw = 1
     for event in bootstrap.get("events", []):
         if event.get("is_next"):
             next_gw = event["id"]
             break
-
-    picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/event/{next_gw}/picks/")
+    picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/{next_gw}/picks/")
     if not picks_data or "picks" not in picks_data:
-        picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/event/1/picks/")
-
+        picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/1/picks/")
     if picks_data and "picks" in picks_data and picks_data["picks"]:
         return {pick["element"] for pick in picks_data["picks"]}
     return set()
 
 bootstrap = load_bootstrap()
-entry = load_entry()
+entry = load_entry(TEAM_ID)
 fixtures = load_fixtures()
 
 # Header
-team_name = entry.get("name", "FC Snus") if entry else "FC Snus"
+team_name = entry.get("name", "FPL Manager") if entry else "FPL Manager"
 st.title(f"⚽ {team_name}")
 
 col1, col2, col3, col4 = st.columns(4)
@@ -67,7 +82,7 @@ col4.metric("Transfers", "0/∞")
 
 st.divider()
 
-# Sidebar
+# Navigation
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Go to",
@@ -97,7 +112,7 @@ if page == "Home":
         if next_gw:
             deadline = next_gw.get('deadline_time', 'N/A')[:16].replace('T', ' ')
             st.info(f"**Next Gameweek:** {next_gw['id']} – {next_gw['name']}  \n**Deadline:** {deadline}")
-    st.write("Use the sidebar to explore your FPL data.")
+    st.write("Enter your FPL Team ID in the sidebar to personalise the dashboard.")
 
 # ---------- MANAGER INFO ----------
 elif page == "Manager Info":
@@ -111,7 +126,7 @@ elif page == "Manager Info":
         c1.metric("Overall Points", points if points is not None else "Not started")
         c2.metric("Overall Rank", rank if rank is not None else "Not started")
     else:
-        st.error("Could not load manager info.")
+        st.error("Could not load manager info. Check the Team ID.")
 
 # ---------- GAMEWEEK INFO ----------
 elif page == "Gameweek Info":
@@ -140,13 +155,10 @@ elif page == "Squad":
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 
-        owned_ids = try_load_squad(bootstrap)
+        owned_ids = try_load_squad(bootstrap, TEAM_ID)
         if not owned_ids:
-            st.warning("Your squad is not available yet via the public API. This is common in pre-season.")
+            st.warning("Squad not available yet via the public API (common in pre-season).")
         else:
-            starters = []
-            bench = []
-            # We need the actual picks order for captain etc, so fetch again
             next_gw = 1
             for event in bootstrap.get("events", []):
                 if event.get("is_next"):
@@ -156,6 +168,7 @@ elif page == "Squad":
             if not picks_data:
                 picks_data = get_data(f"https://fantasy.premierleague.com/api/entry/{TEAM_ID}/event/1/picks/")
 
+            starters, bench = [], []
             for pick in picks_data.get("picks", []):
                 p = players.get(pick["element"], {})
                 row = {
@@ -326,10 +339,10 @@ elif page == "Players - Easiest Fixtures":
     else:
         st.error("Could not load data.")
 
-# ---------- TRANSFER SUGGESTIONS (SMARTER) ----------
+# ---------- TRANSFER SUGGESTIONS ----------
 elif page == "Transfer Suggestions":
     st.subheader("Transfer Suggestions")
-    st.caption("Tries to use your actual squad when available. Not financial advice.")
+    st.caption("Tries to use the entered Team ID's squad when available. Not financial advice.")
 
     if not bootstrap or not fixtures:
         st.error("Could not load data.")
@@ -337,13 +350,12 @@ elif page == "Transfer Suggestions":
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 
-        # Try to load owned players
-        owned_ids = try_load_squad(bootstrap)
+        owned_ids = try_load_squad(bootstrap, TEAM_ID)
 
         if owned_ids:
-            st.success(f"Loaded your squad ({len(owned_ids)} players). Suggestions will exclude players you already own.")
+            st.success(f"Loaded squad ({len(owned_ids)} players). Suggestions exclude players already owned.")
         else:
-            st.info("Could not load your squad yet (normal in pre-season). Showing general suggestions.")
+            st.info("Could not load squad yet (normal in pre-season). Showing general suggestions.")
 
         next_gws = []
         for event in bootstrap.get("events", []):
@@ -363,7 +375,6 @@ elif page == "Transfer Suggestions":
 
         team_avg = {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
 
-        # Filters
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             max_price = st.slider("Max price (£m)", 4.0, 15.0, 8.5, 0.5)
@@ -380,7 +391,6 @@ elif page == "Transfer Suggestions":
 
         suggestions = []
         for p in bootstrap.get("elements", []):
-            # Skip if already in squad
             if p["id"] in owned_ids:
                 continue
             if selected_pos and p["element_type"] != selected_pos:
@@ -412,6 +422,6 @@ elif page == "Transfer Suggestions":
 
         if suggestions:
             st.dataframe(suggestions, use_container_width=True, hide_index=True)
-            st.caption(f"Showing {len(suggestions)} players" + (" (excluding your current squad)" if owned_ids else ""))
+            st.caption(f"Showing {len(suggestions)} players" + (" (excluding owned players)" if owned_ids else ""))
         else:
-            st.info("No players match your current filters. Try relaxing the sliders.")
+            st.info("No players match your current filters.")
