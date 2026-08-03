@@ -372,18 +372,43 @@ elif page == "Squad":
 
         col1, col2 = st.columns(2)
         with col1:
+            with col1:
             if st.button("💾 Save Squad", type="primary"):
                 final = []
                 temp_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
+                team_counts = {}
+
                 for pid in working_squad:
                     p = players_by_id.get(pid)
                     if not p:
                         continue
                     pos = pos_map[p["element_type"]]
-                    if temp_counts[pos] < limits[pos]:
-                        final.append(pid)
-                        temp_counts[pos] += 1
-                st.session_state.saved_squad = final
+                    team_id = p.get("team")
+
+                    # Position limit
+                    if temp_counts[pos] >= limits[pos]:
+                        continue
+
+                    # Max 3 players from the same team
+                    if team_counts.get(team_id, 0) >= 3:
+                        continue
+
+                    final.append(pid)
+                    temp_counts[pos] += 1
+                    team_counts[team_id] = team_counts.get(team_id, 0) + 1
+
+                # Extra validation messages
+                if len(final) < 15:
+                    st.warning("Could not save full 15. Check position limits (2/5/5/3) and max 3 players per club.")
+                else:
+                    st.session_state.saved_squad = final
+                    st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in final]
+                    if st.session_state.captain not in final:
+                        st.session_state.captain = None
+                    if st.session_state.vice not in final:
+                        st.session_state.vice = None
+                    st.success("Squad saved! (FPL rules applied)")
+                    st.rerun()
                 st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in final]
                 if st.session_state.captain not in final:
                     st.session_state.captain = None
