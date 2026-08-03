@@ -194,12 +194,13 @@ if page == "Home":
             deadline = next_gw.get('deadline_time', 'N/A')[:16].replace('T', ' ')
             st.info(f"**Next Gameweek:** {next_gw['id']} – {next_gw['name']}  \n**Deadline:** {deadline}")
     st.write("Use the sidebar to explore different sections of your FPL data.")
-
-elif page == "Manager Info":
-    st.subheader("Manager Info")
+elif page == "Manager":
+    st.subheader("Manager")
+    
     if entry:
         st.write(f"**Team name:** {entry.get('name', 'N/A')}")
         st.write(f"**Manager:** {entry.get('player_first_name', '')} {entry.get('player_last_name', '')}")
+        
         points = entry.get('summary_overall_points')
         rank = entry.get('summary_overall_rank')
         c1, c2 = st.columns(2)
@@ -208,9 +209,10 @@ elif page == "Manager Info":
     else:
         st.error("Could not load manager info. Check the Team ID.")
 
-elif page == "Manager History":
-    st.subheader("Manager History")
+    st.markdown("---")
+    st.markdown("### History")
     st.caption("Points per gameweek, chips used, and past seasons")
+    
     history = load_history(TEAM_ID)
     if not history:
         st.warning("Could not load history. This is normal in early pre-season.")
@@ -220,7 +222,7 @@ elif page == "Manager History":
         past = history.get("past", [])
 
         if current:
-            st.markdown("### Current Season")
+            st.markdown("#### Current Season")
             rows = []
             for gw in current:
                 rows.append({
@@ -238,14 +240,14 @@ elif page == "Manager History":
             st.info("No gameweek history yet (season not started).")
 
         if chips:
-            st.markdown("### Chips Used")
+            st.markdown("#### Chips Used")
             for chip in chips:
                 st.write(f"- **{chip.get('name', 'Chip')}** in GW {chip.get('event')}")
         else:
             st.caption("No chips used yet.")
 
         if past:
-            st.markdown("### Previous Seasons")
+            st.markdown("#### Previous Seasons")
             past_rows = [{"Season": s.get("season_name"), "Points": s.get("total_points"), "Rank": s.get("rank")} for s in past]
             st.dataframe(past_rows, use_container_width=True, hide_index=True)
 
