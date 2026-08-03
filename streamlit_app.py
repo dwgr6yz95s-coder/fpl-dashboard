@@ -150,8 +150,7 @@ page = st.sidebar.radio(
     "Go to",
     [
         "Home",
-        "Manager Info",
-        "Manager History",
+        "Manager",
         "Gameweek Info",
         "Squad",
         "Mini-Leagues",
@@ -163,6 +162,7 @@ page = st.sidebar.radio(
         "Transfer Suggestions"
     ],
     label_visibility="collapsed"
+)
 )
 
 # ---------- LOAD DATA ----------
