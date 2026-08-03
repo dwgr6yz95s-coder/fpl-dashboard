@@ -20,7 +20,7 @@ st.markdown("""
 
 def get_data(url):
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=12)
         if response.status_code == 200:
             return response.json()
         return None
@@ -53,12 +53,15 @@ page = st.sidebar.radio(
     [
         "Home",
         "Manager Info",
+        "Manager History",
         "Gameweek Info",
         "Squad",
         "Mini-Leagues",
         "Fixtures",
         "Fixture Difficulty",
         "Players - Easiest Fixtures",
+        "Player Detail",
+        "Dream Team",
         "Transfer Suggestions"
     ],
     label_visibility="collapsed"
@@ -76,6 +79,22 @@ def load_entry(team_id):
 @st.cache_data(ttl=300)
 def load_fixtures():
     return get_data("https://fantasy.premierleague.com/api/fixtures/")
+
+@st.cache_data(ttl=300)
+def load_history(team_id):
+    return get_data(f"https://fantasy.premierleague.com/api/entry/{team_id}/history/")
+
+@st.cache_data(ttl=300)
+def load_element_summary(player_id):
+    return get_data(f"https://fantasy.premierleague.com/api/element-summary/{player_id}/")
+
+@st.cache_data(ttl=300)
+def load_league_standings(league_id):
+    return get_data(f"https://fantasy.premierleague.com/api/leagues-classic/{league_id}/standings/")
+
+@st.cache_data(ttl=300)
+def load_dream_team(gw):
+    return get_data(f"https://fantasy.premierleague.com/api/dream-team/{gw}/")
 
 bootstrap = load_bootstrap()
 entry = load_entry(TEAM_ID)
@@ -109,7 +128,38 @@ def is_valid_formation(starters):
         return False, "Outfield players must total 10"
     return True, f"{counts['DEF']}-{counts['MID']}-{counts['FWD']}"
 
-def make_row(pid, players_by_id, teams, pos_map):
+def get_next_fixture_difficulty(team_id, fixtures, bootstrap):
+    if not fixtures or not bootstrap:
+        return 3
+    next_gw = None
+    for event in bootstrap.get("events", []):
+        if event.get("is_next"):
+            next_gw = event["id"]
+            break
+    if not next_gw:
+        next_gw = 1
+    for fix in fixtures:
+        if fix.get("event") == next_gw:
+            if fix.get("team_h") == team_id:
+                return fix.get("team_h_difficulty", 3)
+            if fix.get("team_a") == team_id:
+                return fix.get("team_a_difficulty", 3)
+    return 3
+
+def potential_score(player, fixtures, bootstrap):
+    try:
+        form = float(player.get("form") or 0)
+    except:
+        form = 0
+    try:
+        ppg = float(player.get("points_per_game") or 0)
+    except:
+        ppg = 0
+    fdr = get_next_fixture_difficulty(player.get("team"), fixtures, bootstrap)
+    score = (form * 2.0) + (ppg * 1.5) + ((6 - fdr) * 3.0)
+    return round(score, 2), fdr
+
+def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
     p = players_by_id.get(pid, {})
     change = p.get("cost_change_event", 0)
     change_str = ""
@@ -117,6 +167,7 @@ def make_row(pid, players_by_id, teams, pos_map):
         change_str = f" ↑{change/10:.1f}"
     elif change < 0:
         change_str = f" ↓{abs(change)/10:.1f}"
+    score, fdr = potential_score(p, fixtures, bootstrap)
     return {
         "id": pid,
         "Pos": pos_map.get(p.get("element_type"), "?"),
@@ -124,27 +175,12 @@ def make_row(pid, players_by_id, teams, pos_map):
         "Team": teams.get(p.get("team"), "?"),
         "Price": round(p.get("now_cost", 0) / 10, 1),
         "Change": change_str,
-        "raw_change": change
+        "Form": p.get("form", "0.0"),
+        "Points": p.get("total_points", 0),
+        "PPG": p.get("points_per_game", "0.0"),
+        "Next FDR": fdr,
+        "Potential": score
     }
-
-def get_team_avg_fdr(fixtures, bootstrap, next_gws=5):
-    if not fixtures or not bootstrap:
-        return {}
-    team_fdr = defaultdict(list)
-    gws = []
-    for event in bootstrap.get("events", []):
-        if event.get("is_next") or (gws and len(gws) < next_gws):
-            gws.append(event["id"])
-            if len(gws) >= next_gws:
-                break
-    if not gws:
-        gws = [1, 2, 3, 4, 5]
-    for fix in fixtures:
-        gw = fix.get("event")
-        if gw in gws:
-            team_fdr[fix["team_h"]].append(fix.get("team_h_difficulty", 3))
-            team_fdr[fix["team_a"]].append(fix.get("team_a_difficulty", 3))
-    return {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
 
 # ---------- PAGES ----------
 if page == "Home":
@@ -173,6 +209,53 @@ elif page == "Manager Info":
     else:
         st.error("Could not load manager info. Check the Team ID.")
 
+elif page == "Manager History":
+    st.subheader("Manager History")
+    st.caption("Points per gameweek, chips used, and past seasons")
+    history = load_history(TEAM_ID)
+    if not history:
+        st.warning("Could not load history. This is normal in early pre-season.")
+    else:
+        current = history.get("current", [])
+        chips = history.get("chips", [])
+        past = history.get("past", [])
+
+        if current:
+            st.markdown("### Current Season")
+            rows = []
+            for gw in current:
+                rows.append({
+                    "GW": gw.get("event"),
+                    "Points": gw.get("points"),
+                    "Total": gw.get("total_points"),
+                    "Rank": gw.get("overall_rank"),
+                    "GW Rank": gw.get("rank"),
+                    "Transfers": gw.get("event_transfers"),
+                    "Cost": gw.get("event_transfers_cost"),
+                    "Value": round(gw.get("value", 0) / 10, 1) if gw.get("value") else "-"
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("No gameweek history yet (season not started).")
+
+        if chips:
+            st.markdown("### Chips Used")
+            for chip in chips:
+                st.write(f"- **{chip.get('name', 'Chip')}** in GW {chip.get('event')}")
+        else:
+            st.caption("No chips used yet.")
+
+        if past:
+            st.markdown("### Previous Seasons")
+            past_rows = []
+            for s in past:
+                past_rows.append({
+                    "Season": s.get("season_name"),
+                    "Points": s.get("total_points"),
+                    "Rank": s.get("rank")
+                })
+            st.dataframe(past_rows, use_container_width=True, hide_index=True)
+
 elif page == "Gameweek Info":
     st.subheader("Gameweek Info")
     if bootstrap:
@@ -191,7 +274,7 @@ elif page == "Gameweek Info":
 
 elif page == "Squad":
     st.subheader("Your Squad")
-    st.caption("Build squad → set Starting XI → choose Captain/Vice → get swap ideas")
+    st.caption("Build squad → manage XI → auto captain → see best options inside your squad")
 
     if not bootstrap:
         st.error("Could not load player data.")
@@ -200,7 +283,6 @@ elif page == "Squad":
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
         limits = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
-        team_avg_fdr = get_team_avg_fdr(fixtures, bootstrap)
 
         if "saved_squad" not in st.session_state:
             st.session_state.saved_squad = []
@@ -211,7 +293,6 @@ elif page == "Squad":
         if "vice" not in st.session_state:
             st.session_state.vice = None
 
-        # ---------- 1. BUILD 15-MAN SQUAD ----------
         st.markdown("### 1. Build your 15-man squad")
         pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
 
@@ -277,10 +358,9 @@ elif page == "Squad":
                 st.session_state.vice = None
                 st.rerun()
 
-        # ---------- 2. MANAGE STARTING XI / BENCH / C / VC ----------
         if len(st.session_state.saved_squad) == 15:
             st.markdown("---")
-            st.markdown("### 2. Starting XI, Bench, Captain & Swaps")
+            st.markdown("### 2. Starting XI, Bench & Captain")
 
             total_value = sum(players_by_id[pid]["now_cost"] / 10 for pid in st.session_state.saved_squad if pid in players_by_id)
             bank = 100.0 - total_value
@@ -290,7 +370,6 @@ elif page == "Squad":
             c2.metric("In the Bank", f"£{bank:.1f}m")
             c3.metric("Players", "15/15")
 
-            # Auto default XI if empty
             if not st.session_state.starting_xi:
                 gk = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] == "GKP"]
                 outfield = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] != "GKP"]
@@ -298,9 +377,9 @@ elif page == "Squad":
 
             st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
 
-            starters = [make_row(pid, players_by_id, teams, pos_map) for pid in st.session_state.starting_xi]
+            starters = [make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap) for pid in st.session_state.starting_xi]
             bench_ids = [pid for pid in st.session_state.saved_squad if pid not in st.session_state.starting_xi]
-            bench = [make_row(pid, players_by_id, teams, pos_map) for pid in bench_ids]
+            bench = [make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap) for pid in bench_ids]
 
             valid, formation_msg = is_valid_formation(starters)
 
@@ -309,104 +388,91 @@ elif page == "Squad":
             else:
                 st.error(f"Invalid Starting XI: {formation_msg if len(starters)==11 else 'Must have exactly 11 players'}")
 
-            # ---- STARTING XI ----
+            if st.button("🤖 Auto-select Captain (best potential for next GW)"):
+                if starters:
+                    best = max(starters, key=lambda x: x["Potential"])
+                    st.session_state.captain = best["id"]
+                    others = [s for s in starters if s["id"] != best["id"]]
+                    if others:
+                        second = max(others, key=lambda x: x["Potential"])
+                        st.session_state.vice = second["id"]
+                    st.success(f"Captain set to **{best['Player']}** (Potential {best['Potential']})")
+                    st.rerun()
+
             st.markdown("**Starting XI**")
-            for row in starters:
-                cols = st.columns([1, 3, 1, 2, 2, 1, 1, 2])
+            for row in sorted(starters, key=lambda x: -x["Potential"]):
+                cols = st.columns([1, 3, 1, 1.5, 1, 1, 1, 1, 1])
                 cols[0].write(row["Pos"])
                 cols[1].write(row["Player"])
                 cols[2].write(row["Team"])
                 cols[3].write(f"£{row['Price']}m{row['Change']}")
-                
-                # Captain / Vice
-                is_c = st.session_state.captain == row["id"]
-                is_v = st.session_state.vice == row["id"]
-                if cols[4].button("C" if not is_c else "★ C", key=f"cap_{row['id']}"):
-                    st.session_state.captain = row["id"]
-                    if st.session_state.vice == row["id"]:
-                        st.session_state.vice = None
-                    st.rerun()
-                if cols[5].button("V" if not is_v else "★ V", key=f"vice_{row['id']}"):
-                    st.session_state.vice = row["id"]
-                    if st.session_state.captain == row["id"]:
-                        st.session_state.captain = None
-                    st.rerun()
+                cols[4].write(row["Form"])
+                cols[5].write(row["Points"])
+                cols[6].write(row["Next FDR"])
+                cols[7].write(row["Potential"])
+                with cols[8]:
+                    c1, c2, c3 = st.columns(3)
+                    is_c = st.session_state.captain == row["id"]
+                    is_v = st.session_state.vice == row["id"]
+                    if c1.button("C" if not is_c else "★", key=f"cap_{row['id']}", help="Set Captain"):
+                        st.session_state.captain = row["id"]
+                        if st.session_state.vice == row["id"]:
+                            st.session_state.vice = None
+                        st.rerun()
+                    if c2.button("V" if not is_v else "★", key=f"vice_{row['id']}", help="Set Vice"):
+                        st.session_state.vice = row["id"]
+                        if st.session_state.captain == row["id"]:
+                            st.session_state.captain = None
+                        st.rerun()
+                    if c3.button("↓", key=f"to_bench_{row['id']}", help="To Bench"):
+                        st.session_state.starting_xi.remove(row["id"])
+                        if st.session_state.captain == row["id"]:
+                            st.session_state.captain = None
+                        if st.session_state.vice == row["id"]:
+                            st.session_state.vice = None
+                        st.rerun()
 
-                if cols[6].button("↓", key=f"to_bench_{row['id']}", help="Move to bench"):
-                    st.session_state.starting_xi.remove(row["id"])
-                    if st.session_state.captain == row["id"]:
-                        st.session_state.captain = None
-                    if st.session_state.vice == row["id"]:
-                        st.session_state.vice = None
-                    st.rerun()
-
-            # Show current C / VC
             cap_name = players_by_id.get(st.session_state.captain, {}).get("web_name", "None") if st.session_state.captain else "None"
             vice_name = players_by_id.get(st.session_state.vice, {}).get("web_name", "None") if st.session_state.vice else "None"
             st.caption(f"Captain: **{cap_name}**  |  Vice-Captain: **{vice_name}**")
 
-            st.markdown("")
-            # ---- BENCH ----
             st.markdown("**Bench**")
             for row in bench:
-                cols = st.columns([1, 3, 1, 2, 2, 2])
+                cols = st.columns([1, 3, 1, 1.5, 1, 1, 1, 1, 1])
                 cols[0].write(row["Pos"])
                 cols[1].write(row["Player"])
                 cols[2].write(row["Team"])
                 cols[3].write(f"£{row['Price']}m{row['Change']}")
+                cols[4].write(row["Form"])
+                cols[5].write(row["Points"])
+                cols[6].write(row["Next FDR"])
+                cols[7].write(row["Potential"])
                 if len(st.session_state.starting_xi) < 11:
-                    if cols[4].button("↑ XI", key=f"to_xi_{row['id']}"):
+                    if cols[8].button("↑ XI", key=f"to_xi_{row['id']}"):
                         st.session_state.starting_xi.append(row["id"])
                         st.rerun()
                 else:
-                    cols[4].write("")
+                    cols[8].write("")
 
-            # ---------- 3. NEXT BEST SWAP SUGGESTIONS ----------
             st.markdown("---")
-            st.markdown("### 3. Next Best Swap Suggestions")
-            st.caption("Select a player from your squad to see better alternatives in the same position (based on easier fixtures + similar price)")
-
-            all_squad_rows = starters + bench
-            swap_options = {f"{r['Pos']} | {r['Player']} (£{r['Price']}m)": r["id"] for r in all_squad_rows}
-            chosen_label = st.selectbox("Player to improve", ["— Select a player —"] + list(swap_options.keys()))
-
-            if chosen_label != "— Select a player —":
-                chosen_id = swap_options[chosen_label]
-                chosen = players_by_id[chosen_id]
-                chosen_pos = chosen["element_type"]
-                chosen_price = chosen["now_cost"] / 10
-                chosen_fdr = team_avg_fdr.get(chosen["team"], 3.0)
-
-                # Find alternatives: same position, price within ±1.5m, better (lower) FDR
-                alternatives = []
-                for p in bootstrap["elements"]:
-                    if p["id"] == chosen_id:
-                        continue
-                    if p["element_type"] != chosen_pos:
-                        continue
-                    price = p["now_cost"] / 10
-                    if abs(price - chosen_price) > 1.5:
-                        continue
-                    fdr = team_avg_fdr.get(p["team"], 3.0)
-                    if fdr < chosen_fdr - 0.1:  # meaningfully easier
-                        alternatives.append({
-                            "Player": p["web_name"],
-                            "Team": teams.get(p["team"], "?"),
-                            "Price": round(price, 1),
-                            "Avg FDR": round(fdr, 2),
-                            "Selected %": p.get("selected_by_percent", "-"),
-                            "Form": p.get("form", "-"),
-                            "Diff": round(chosen_fdr - fdr, 2)
-                        })
-
-                alternatives = sorted(alternatives, key=lambda x: (x["Avg FDR"], x["Price"]))[:8]
-
-                if alternatives:
-                    st.success(f"Better fixture options than **{chosen['web_name']}** (current FDR {chosen_fdr:.2f})")
-                    st.dataframe(alternatives, use_container_width=True, hide_index=True)
-                else:
-                    st.info("No clearly better alternatives found within ±£1.5m right now.")
-
+            st.markdown("### 3. Best players in your squad for next GW")
+            all_rows = starters + bench
+            ranked = sorted(all_rows, key=lambda x: -x["Potential"])
+            display = []
+            for r in ranked:
+                status = "C" if r["id"] == st.session_state.captain else ("V" if r["id"] == st.session_state.vice else ("XI" if r["id"] in st.session_state.starting_xi else "Bench"))
+                display.append({
+                    "Status": status,
+                    "Pos": r["Pos"],
+                    "Player": r["Player"],
+                    "Team": r["Team"],
+                    "Form": r["Form"],
+                    "PPG": r["PPG"],
+                    "Next FDR": r["Next FDR"],
+                    "Potential": r["Potential"],
+                    "Price": r["Price"]
+                })
+            st.dataframe(display, use_container_width=True, hide_index=True)
         elif st.session_state.saved_squad:
             st.warning(f"You currently have {len(st.session_state.saved_squad)}/15 players. Finish the squad first.")
         else:
@@ -414,15 +480,42 @@ elif page == "Squad":
 
 elif page == "Mini-Leagues":
     st.subheader("Mini-Leagues")
-    if entry:
-        classic = entry.get("leagues", {}).get("classic", [])
-        if classic:
-            for league in classic:
-                st.markdown(f"**{league.get('name')}** — Rank: {league.get('entry_rank', 'N/A')}")
-        else:
-            st.write("No classic leagues found.")
+    st.caption("Your classic leagues + standings (top of the table)")
+    if not entry:
+        st.error("Could not load manager data.")
     else:
-        st.error("Could not load leagues.")
+        classic = entry.get("leagues", {}).get("classic", [])
+        if not classic:
+            st.write("No classic leagues found.")
+        else:
+            league_names = {l["id"]: l["name"] for l in classic}
+            selected_league = st.selectbox(
+                "Select a league",
+                options=list(league_names.keys()),
+                format_func=lambda x: f"{league_names[x]} (ID: {x})"
+            )
+            st.write(f"**Your rank in this league:** {next((l.get('entry_rank', 'N/A') for l in classic if l['id'] == selected_league), 'N/A')}")
+
+            standings = load_league_standings(selected_league)
+            if standings and "standings" in standings:
+                results = standings["standings"].get("results", [])
+                if results:
+                    rows = []
+                    for r in results[:25]:  # top 25
+                        rows.append({
+                            "Rank": r.get("rank"),
+                            "Team": r.get("entry_name"),
+                            "Manager": r.get("player_name"),
+                            "GW Points": r.get("event_total"),
+                            "Total": r.get("total")
+                        })
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                    if standings["standings"].get("has_next"):
+                        st.caption("Showing first page of standings.")
+                else:
+                    st.info("No standings available yet (common in pre-season).")
+            else:
+                st.info("Could not load standings for this league yet.")
 
 elif page == "Fixtures":
     st.subheader("Upcoming Fixtures")
@@ -543,6 +636,124 @@ elif page == "Players - Easiest Fixtures":
         st.dataframe(players, use_container_width=True, hide_index=True)
     else:
         st.error("Could not load data.")
+
+elif page == "Player Detail":
+    st.subheader("Player Detail")
+    st.caption("Deep dive into a single player (history + upcoming fixtures)")
+    if not bootstrap:
+        st.error("Could not load player list.")
+    else:
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        player_options = {}
+        for p in bootstrap["elements"]:
+            label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - {pos_map.get(p['element_type'], '?')} - £{p['now_cost']/10:.1f}m"
+            player_options[label] = p["id"]
+
+        chosen = st.selectbox("Select a player", ["— Choose a player —"] + list(player_options.keys()))
+        if chosen != "— Choose a player —":
+            pid = player_options[chosen]
+            summary = load_element_summary(pid)
+            player = next((p for p in bootstrap["elements"] if p["id"] == pid), {})
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Price", f"£{player.get('now_cost', 0)/10:.1f}m")
+            c2.metric("Form", player.get("form", "-"))
+            c3.metric("Total Points", player.get("total_points", 0))
+            c4.metric("Selected by", f"{player.get('selected_by_percent', '-')}%")
+
+            if summary:
+                # Upcoming fixtures
+                upcoming = summary.get("fixtures", [])
+                if upcoming:
+                    st.markdown("### Upcoming Fixtures")
+                    fix_rows = []
+                    for f in upcoming[:8]:
+                        fix_rows.append({
+                            "GW": f.get("event"),
+                            "Opponent": f.get("opponent_name") or teams.get(f.get("opponent"), "?"),
+                            "Home/Away": "H" if f.get("is_home") else "A",
+                            "Difficulty": f.get("difficulty"),
+                            "Kickoff": (f.get("kickoff_time") or "")[:16].replace("T", " ")
+                        })
+                    st.dataframe(fix_rows, use_container_width=True, hide_index=True)
+
+                # This season history
+                history = summary.get("history", [])
+                if history:
+                    st.markdown("### This Season (Gameweek History)")
+                    hist_rows = []
+                    for h in history:
+                        hist_rows.append({
+                            "GW": h.get("round"),
+                            "Points": h.get("total_points"),
+                            "Minutes": h.get("minutes"),
+                            "Goals": h.get("goals_scored"),
+                            "Assists": h.get("assists"),
+                            "CS": h.get("clean_sheets"),
+                            "Bonus": h.get("bonus"),
+                            "Value": round(h.get("value", 0) / 10, 1)
+                        })
+                    st.dataframe(hist_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No gameweek history yet for this player.")
+
+                # Past seasons
+                past = summary.get("history_past", [])
+                if past:
+                    st.markdown("### Previous Seasons")
+                    past_rows = []
+                    for s in past:
+                        past_rows.append({
+                            "Season": s.get("season_name"),
+                            "Points": s.get("total_points"),
+                            "Minutes": s.get("minutes"),
+                            "Goals": s.get("goals_scored"),
+                            "Assists": s.get("assists"),
+                            "Start Price": round(s.get("start_cost", 0) / 10, 1),
+                            "End Price": round(s.get("end_cost", 0) / 10, 1)
+                        })
+                    st.dataframe(past_rows, use_container_width=True, hide_index=True)
+            else:
+                st.warning("Could not load detailed data for this player.")
+
+elif page == "Dream Team":
+    st.subheader("Dream Team")
+    st.caption("Official highest-scoring XI for a gameweek")
+    if not bootstrap:
+        st.error("Could not load data.")
+    else:
+        # Find available GWs (prefer finished ones, fallback to 1)
+        available_gws = []
+        for event in bootstrap.get("events", []):
+            if event.get("finished") or event.get("is_current") or event.get("id") == 1:
+                available_gws.append(event["id"])
+        if not available_gws:
+            available_gws = [1]
+
+        gw = st.selectbox("Select Gameweek", available_gws, index=len(available_gws)-1)
+        dream = load_dream_team(gw)
+
+        if not dream or "team" not in dream:
+            st.info("Dream Team not available yet for this gameweek (normal in pre-season).")
+        else:
+            teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+            players = {p["id"]: p for p in bootstrap["elements"]}
+            pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+
+            st.metric("Total Points", dream.get("team_points", "-"))
+
+            rows = []
+            for pick in dream.get("team", []):
+                pid = pick.get("element")
+                p = players.get(pid, {})
+                rows.append({
+                    "Pos": pos_map.get(p.get("element_type"), "?"),
+                    "Player": p.get("web_name", "Unknown"),
+                    "Team": teams.get(p.get("team"), "?"),
+                    "Points": pick.get("points", 0)
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
 
 elif page == "Transfer Suggestions":
     st.subheader("Transfer Suggestions")
