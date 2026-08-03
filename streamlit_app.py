@@ -372,7 +372,6 @@ elif page == "Squad":
 
         col1, col2 = st.columns(2)
         with col1:
-            with col1:
             if st.button("💾 Save Squad", type="primary"):
                 final = []
                 temp_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
