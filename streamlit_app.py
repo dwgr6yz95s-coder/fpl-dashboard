@@ -334,7 +334,6 @@ elif page == "Squad":
                     st.error(f"Could not load file: {e}")
 
         st.markdown("### 1. Build your 15-man squad")
-        st.markdown("### 1. Build your 15-man squad")
         pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
 
         options = []
