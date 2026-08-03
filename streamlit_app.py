@@ -92,12 +92,11 @@ col4.metric("Transfers", "0/∞")
 
 st.divider()
 
-# ---------- HELPER ----------
+# ---------- HELPERS ----------
 def is_valid_formation(starters):
     counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
     for p in starters:
         counts[p["Pos"]] += 1
-
     if counts["GKP"] != 1:
         return False, "Must have exactly 1 Goalkeeper"
     if counts["DEF"] < 3 or counts["DEF"] > 5:
@@ -108,18 +107,44 @@ def is_valid_formation(starters):
         return False, "Must have 1–3 Forwards"
     if counts["DEF"] + counts["MID"] + counts["FWD"] != 10:
         return False, "Outfield players must total 10"
-
     return True, f"{counts['DEF']}-{counts['MID']}-{counts['FWD']}"
 
 def make_row(pid, players_by_id, teams, pos_map):
     p = players_by_id.get(pid, {})
+    change = p.get("cost_change_event", 0)
+    change_str = ""
+    if change > 0:
+        change_str = f" ↑{change/10:.1f}"
+    elif change < 0:
+        change_str = f" ↓{abs(change)/10:.1f}"
     return {
         "id": pid,
         "Pos": pos_map.get(p.get("element_type"), "?"),
         "Player": p.get("web_name", "Unknown"),
         "Team": teams.get(p.get("team"), "?"),
-        "Price": round(p.get("now_cost", 0) / 10, 1)
+        "Price": round(p.get("now_cost", 0) / 10, 1),
+        "Change": change_str,
+        "raw_change": change
     }
+
+def get_team_avg_fdr(fixtures, bootstrap, next_gws=5):
+    if not fixtures or not bootstrap:
+        return {}
+    team_fdr = defaultdict(list)
+    gws = []
+    for event in bootstrap.get("events", []):
+        if event.get("is_next") or (gws and len(gws) < next_gws):
+            gws.append(event["id"])
+            if len(gws) >= next_gws:
+                break
+    if not gws:
+        gws = [1, 2, 3, 4, 5]
+    for fix in fixtures:
+        gw = fix.get("event")
+        if gw in gws:
+            team_fdr[fix["team_h"]].append(fix.get("team_h_difficulty", 3))
+            team_fdr[fix["team_a"]].append(fix.get("team_a_difficulty", 3))
+    return {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
 
 # ---------- PAGES ----------
 if page == "Home":
@@ -166,7 +191,7 @@ elif page == "Gameweek Info":
 
 elif page == "Squad":
     st.subheader("Your Squad")
-    st.caption("Build a 15-man squad, then move players between Starting XI and Bench")
+    st.caption("Build squad → set Starting XI → choose Captain/Vice → get swap ideas")
 
     if not bootstrap:
         st.error("Could not load player data.")
@@ -175,11 +200,16 @@ elif page == "Squad":
         teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
         pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
         limits = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
+        team_avg_fdr = get_team_avg_fdr(fixtures, bootstrap)
 
         if "saved_squad" not in st.session_state:
             st.session_state.saved_squad = []
         if "starting_xi" not in st.session_state:
             st.session_state.starting_xi = []
+        if "captain" not in st.session_state:
+            st.session_state.captain = None
+        if "vice" not in st.session_state:
+            st.session_state.vice = None
 
         # ---------- 1. BUILD 15-MAN SQUAD ----------
         st.markdown("### 1. Build your 15-man squad")
@@ -232,22 +262,26 @@ elif page == "Squad":
                         final.append(pid)
                         temp_counts[pos] += 1
                 st.session_state.saved_squad = final
-                # Keep existing starting_xi only if still in squad
                 st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in final]
+                if st.session_state.captain not in final:
+                    st.session_state.captain = None
+                if st.session_state.vice not in final:
+                    st.session_state.vice = None
                 st.success("Squad saved!")
                 st.rerun()
         with col2:
             if st.button("Clear Squad"):
                 st.session_state.saved_squad = []
                 st.session_state.starting_xi = []
+                st.session_state.captain = None
+                st.session_state.vice = None
                 st.rerun()
 
-        # ---------- 2. MANAGE STARTING XI / BENCH ----------
+        # ---------- 2. MANAGE STARTING XI / BENCH / C / VC ----------
         if len(st.session_state.saved_squad) == 15:
             st.markdown("---")
-            st.markdown("### 2. Manage Starting XI & Bench")
+            st.markdown("### 2. Starting XI, Bench, Captain & Swaps")
 
-            # Value & Bank
             total_value = sum(players_by_id[pid]["now_cost"] / 10 for pid in st.session_state.saved_squad if pid in players_by_id)
             bank = 100.0 - total_value
 
@@ -256,14 +290,12 @@ elif page == "Squad":
             c2.metric("In the Bank", f"£{bank:.1f}m")
             c3.metric("Players", "15/15")
 
-            # Ensure we have a starting_xi list
+            # Auto default XI if empty
             if not st.session_state.starting_xi:
-                # Auto-create a sensible default (1 GK + first 10 outfield)
                 gk = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] == "GKP"]
                 outfield = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] != "GKP"]
                 st.session_state.starting_xi = (gk[:1] + outfield[:10]) if gk else outfield[:11]
 
-            # Clean starting_xi (remove any no longer in squad)
             st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
 
             starters = [make_row(pid, players_by_id, teams, pos_map) for pid in st.session_state.starting_xi]
@@ -279,36 +311,104 @@ elif page == "Squad":
 
             # ---- STARTING XI ----
             st.markdown("**Starting XI**")
-            for i, row in enumerate(starters):
-                cols = st.columns([1, 3, 2, 2, 2])
+            for row in starters:
+                cols = st.columns([1, 3, 1, 2, 2, 1, 1, 2])
                 cols[0].write(row["Pos"])
                 cols[1].write(row["Player"])
                 cols[2].write(row["Team"])
-                cols[3].write(f"£{row['Price']}m")
-                if cols[4].button("↓ Bench", key=f"to_bench_{row['id']}"):
-                    st.session_state.starting_xi.remove(row["id"])
+                cols[3].write(f"£{row['Price']}m{row['Change']}")
+                
+                # Captain / Vice
+                is_c = st.session_state.captain == row["id"]
+                is_v = st.session_state.vice == row["id"]
+                if cols[4].button("C" if not is_c else "★ C", key=f"cap_{row['id']}"):
+                    st.session_state.captain = row["id"]
+                    if st.session_state.vice == row["id"]:
+                        st.session_state.vice = None
                     st.rerun()
+                if cols[5].button("V" if not is_v else "★ V", key=f"vice_{row['id']}"):
+                    st.session_state.vice = row["id"]
+                    if st.session_state.captain == row["id"]:
+                        st.session_state.captain = None
+                    st.rerun()
+
+                if cols[6].button("↓", key=f"to_bench_{row['id']}", help="Move to bench"):
+                    st.session_state.starting_xi.remove(row["id"])
+                    if st.session_state.captain == row["id"]:
+                        st.session_state.captain = None
+                    if st.session_state.vice == row["id"]:
+                        st.session_state.vice = None
+                    st.rerun()
+
+            # Show current C / VC
+            cap_name = players_by_id.get(st.session_state.captain, {}).get("web_name", "None") if st.session_state.captain else "None"
+            vice_name = players_by_id.get(st.session_state.vice, {}).get("web_name", "None") if st.session_state.vice else "None"
+            st.caption(f"Captain: **{cap_name}**  |  Vice-Captain: **{vice_name}**")
 
             st.markdown("")
             # ---- BENCH ----
             st.markdown("**Bench**")
-            for i, row in enumerate(bench):
-                cols = st.columns([1, 3, 2, 2, 2])
+            for row in bench:
+                cols = st.columns([1, 3, 1, 2, 2, 2])
                 cols[0].write(row["Pos"])
                 cols[1].write(row["Player"])
                 cols[2].write(row["Team"])
-                cols[3].write(f"£{row['Price']}m")
+                cols[3].write(f"£{row['Price']}m{row['Change']}")
                 if len(st.session_state.starting_xi) < 11:
                     if cols[4].button("↑ XI", key=f"to_xi_{row['id']}"):
                         st.session_state.starting_xi.append(row["id"])
                         st.rerun()
                 else:
-                    cols[4].write("")  # no button if already 11
+                    cols[4].write("")
 
-            st.caption("Use the buttons to move players between Starting XI and Bench. You must end with exactly 11 starters.")
+            # ---------- 3. NEXT BEST SWAP SUGGESTIONS ----------
+            st.markdown("---")
+            st.markdown("### 3. Next Best Swap Suggestions")
+            st.caption("Select a player from your squad to see better alternatives in the same position (based on easier fixtures + similar price)")
+
+            all_squad_rows = starters + bench
+            swap_options = {f"{r['Pos']} | {r['Player']} (£{r['Price']}m)": r["id"] for r in all_squad_rows}
+            chosen_label = st.selectbox("Player to improve", ["— Select a player —"] + list(swap_options.keys()))
+
+            if chosen_label != "— Select a player —":
+                chosen_id = swap_options[chosen_label]
+                chosen = players_by_id[chosen_id]
+                chosen_pos = chosen["element_type"]
+                chosen_price = chosen["now_cost"] / 10
+                chosen_fdr = team_avg_fdr.get(chosen["team"], 3.0)
+
+                # Find alternatives: same position, price within ±1.5m, better (lower) FDR
+                alternatives = []
+                for p in bootstrap["elements"]:
+                    if p["id"] == chosen_id:
+                        continue
+                    if p["element_type"] != chosen_pos:
+                        continue
+                    price = p["now_cost"] / 10
+                    if abs(price - chosen_price) > 1.5:
+                        continue
+                    fdr = team_avg_fdr.get(p["team"], 3.0)
+                    if fdr < chosen_fdr - 0.1:  # meaningfully easier
+                        alternatives.append({
+                            "Player": p["web_name"],
+                            "Team": teams.get(p["team"], "?"),
+                            "Price": round(price, 1),
+                            "Avg FDR": round(fdr, 2),
+                            "Selected %": p.get("selected_by_percent", "-"),
+                            "Form": p.get("form", "-"),
+                            "Diff": round(chosen_fdr - fdr, 2)
+                        })
+
+                alternatives = sorted(alternatives, key=lambda x: (x["Avg FDR"], x["Price"]))[:8]
+
+                if alternatives:
+                    st.success(f"Better fixture options than **{chosen['web_name']}** (current FDR {chosen_fdr:.2f})")
+                    st.dataframe(alternatives, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No clearly better alternatives found within ±£1.5m right now.")
 
         elif st.session_state.saved_squad:
-            st.warning(f"You currently have {len(st.session_state.saved_squad)}/15 players. Add more to reach 15 before managing the Starting XI.")
+            st.warning(f"You currently have {len(st.session_state.saved_squad)}/15 players. Finish the squad first.")
         else:
             st.info("No players saved yet. Add players by position above, then click **Save Squad**.")
 
