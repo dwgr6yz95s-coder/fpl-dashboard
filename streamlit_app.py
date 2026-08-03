@@ -429,59 +429,75 @@ elif page == "Squad":
             else:
                 st.error(f"Invalid Starting XI: {formation_msg if len(starters)==11 else 'Must have exactly 11 players'}")
                 
-            # ---------- VISUAL PITCH ----------
+                 # ---------- VISUAL PITCH ----------
             st.markdown("### Pitch View")
-            
+
             # Group starters by position
             gk = [r for r in starters if r["Pos"] == "GKP"]
             defs = [r for r in starters if r["Pos"] == "DEF"]
             mids = [r for r in starters if r["Pos"] == "MID"]
             fwds = [r for r in starters if r["Pos"] == "FWD"]
 
-            def player_card(p):
+            def player_card(p, is_bench=False):
                 is_c = st.session_state.captain == p["id"]
                 is_v = st.session_state.vice == p["id"]
-                badge = " (C)" if is_c else (" (V)" if is_v else "")
-                return f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \nFDR {p['Next FDR']}"
+                
+                badge = ""
+                if is_c:
+                    badge = " ©️"
+                elif is_v:
+                    badge = " ⓥ"
+                
+                # Try to show a simple fixture hint
+                fixture_text = f"FDR {p['Next FDR']}"
+                
+                card = f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \n{fixture_text}"
+                
+                if is_c:
+                    st.success(card)          # green for captain
+                elif is_v:
+                    st.warning(card)          # yellow/orange for vice
+                else:
+                    st.info(card)             # normal blue
 
-            # GK row
+            # GK
             if gk:
-                cols = st.columns([1, 1, 1])
-                with cols[1]:
-                    st.info(player_card(gk[0]))
+                c1, c2, c3 = st.columns([1.2, 1, 1.2])
+                with c2:
+                    player_card(gk[0])
 
-            # DEF row
+            # DEF
             if defs:
                 cols = st.columns(len(defs))
                 for i, p in enumerate(defs):
                     with cols[i]:
-                        st.info(player_card(p))
+                        player_card(p)
 
-            # MID row
+            # MID
             if mids:
                 cols = st.columns(len(mids))
                 for i, p in enumerate(mids):
                     with cols[i]:
-                        st.info(player_card(p))
+                        player_card(p)
 
-            # FWD row
+            # FWD
             if fwds:
                 cols = st.columns(len(fwds))
                 for i, p in enumerate(fwds):
                     with cols[i]:
-                        st.info(player_card(p))
+                        player_card(p)
 
-            st.caption("Captain (C) and Vice (V) are marked. Use the list below to change positions or captain.")
-            if st.button("🤖 Auto-select Captain (best potential for next GW)"):
-                if starters:
-                    best = max(starters, key=lambda x: x["Potential"])
-                    st.session_state.captain = best["id"]
-                    others = [s for s in starters if s["id"] != best["id"]]
-                    if others:
-                        second = max(others, key=lambda x: x["Potential"])
-                        st.session_state.vice = second["id"]
-                    st.success(f"Captain set to **{best['Player']}** (Potential {best['Potential']})")
-                    st.rerun()
+            st.caption("©️ = Captain   ·   ⓥ = Vice-Captain")
+
+            # ---------- BENCH ----------
+            st.markdown("#### Bench")
+            if bench:
+                cols = st.columns(len(bench))
+                for i, p in enumerate(bench):
+                    with cols[i]:
+                        player_card(p, is_bench=True)
+            else:
+                st.caption("No players on the bench")
 
             st.markdown("**Starting XI**")
             for row in sorted(starters, key=lambda x: -x["Potential"]):
