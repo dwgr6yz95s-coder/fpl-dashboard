@@ -326,15 +326,7 @@ elif page == "Squad":
                     import json
                     data = json.load(uploaded_file)
                     st.session_state.saved_squad = data.get("saved_squad", [])
-                    st.session_state.starting_xi = data.get("starting_xi", [])
-                    st.session_state.captain = data.get("captain")
-                    st.session_state.vice = data.get("vice")
-                    st.success("Squad loaded!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not load file: {e}")
-
-                st.markdown("### 1. Build your 15-man squad")
+                    
 
         # Live working list
         if "working_squad" not in st.session_state:
