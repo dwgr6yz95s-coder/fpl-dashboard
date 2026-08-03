@@ -436,7 +436,8 @@ elif page == "Transfer Suggestions":
 
         if suggestions:
             st.dataframe(suggestions, use_container_width=True, hide_index=True)
-        else:
+            
+                    else:
             st.info("No players match your current filters.")    st.sidebar.error("Please enter a valid number")
 
 st.sidebar.caption("Anyone can enter their own Team ID to see their data.")
