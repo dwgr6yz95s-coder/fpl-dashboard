@@ -97,6 +97,16 @@ def get_next_fixture_difficulty(team_id, fixtures, bootstrap):
     return 3
     
 def potential_score(player, fixtures, bootstrap):
+    """
+    Smarter potential score for next few gameweeks.
+    Factors:
+    - Form
+    - Points per game
+    - Next 3 fixtures (weighted)
+    - Ownership (differential boost)
+    - Minutes played (reliability)
+    - Price value (cheap enablers get a small boost)
+    """
     try:
         form = float(player.get("form") or 0)
     except:
@@ -113,27 +123,77 @@ def potential_score(player, fixtures, bootstrap):
         minutes = float(player.get("minutes") or 0)
     except:
         minutes = 0
+    try:
+        price = float(player.get("now_cost") or 0) / 10
+    except:
+        price = 0
 
-    fdr = get_next_fixture_difficulty(player.get("team"), fixtures, bootstrap)
+    # --- Next 3 gameweeks FDR (weighted) ---
+    next_gws = []
+    if bootstrap:
+        for event in bootstrap.get("events", []):
+            if event.get("is_next") or (next_gws and len(next_gws) < 3):
+                next_gws.append(event["id"])
+                if len(next_gws) >= 3:
+                    break
+    if not next_gws:
+        next_gws = [1, 2, 3]
 
-    # Base score
-    score = (form * 2.5) + (ppg * 1.8) + ((6 - fdr) * 3.2)
+    team_id = player.get("team")
+    fdr_list = []
+    if fixtures and team_id:
+        for fix in fixtures:
+            gw = fix.get("event")
+            if gw in next_gws:
+                if fix.get("team_h") == team_id:
+                    fdr_list.append(fix.get("team_h_difficulty", 3))
+                elif fix.get("team_a") == team_id:
+                    fdr_list.append(fix.get("team_a_difficulty", 3))
 
-    # Small ownership adjustment (slight preference for differentials under 20%)
+    if fdr_list:
+        if len(fdr_list) >= 3:
+            weighted_fdr = (fdr_list[0] * 0.50) + (fdr_list[1] * 0.30) + (fdr_list[2] * 0.20)
+        elif len(fdr_list) == 2:
+            weighted_fdr = (fdr_list[0] * 0.60) + (fdr_list[1] * 0.40)
+        else:
+            weighted_fdr = fdr_list[0]
+    else:
+        weighted_fdr = 3.0
+
+    # --- Base score ---
+    score = 0
+    score += form * 2.6          # recent form is important
+    score += ppg * 1.7           # underlying quality
+    score += (6 - weighted_fdr) * 3.4   # fixture run
+
+    # --- Ownership (differentials) ---
     if ownership < 5:
-        score += 1.5          # strong differential
-    elif ownership < 15:
-        score += 0.8
-    elif ownership > 40:
-        score -= 0.5          # slight penalty for very popular picks
-
-    # Minutes reliability (pre-season this will be low for everyone)
-    if minutes > 500:
+        score += 1.8             # strong differential
+    elif ownership < 12:
         score += 1.0
-    elif minutes > 200:
-        score += 0.4
+    elif ownership < 25:
+        score += 0.3
+    elif ownership > 45:
+        score -= 0.6             # slight template penalty
 
-    return round(score, 2), fdr
+    # --- Minutes reliability ---
+    if minutes > 600:
+        score += 1.2
+    elif minutes > 300:
+        score += 0.6
+    elif minutes < 90 and minutes > 0:
+        score -= 0.8             # barely played
+
+    # --- Price value (small boost for cheaper options) ---
+    if price > 0:
+        if price <= 5.0:
+            score += 0.8
+        elif price <= 6.5:
+            score += 0.3
+        elif price >= 10.0:
+            score -= 0.3         # expensive players need to earn it
+
+    return round(score, 2), round(weighted_fdr, 1)
 
 def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
     p = players_by_id.get(pid, {})
