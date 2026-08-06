@@ -278,7 +278,8 @@ elif page == "Squad":
         pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
         limits = {"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3}
 
-               if "saved_squad" not in st.session_state:
+        # Session state
+        if "saved_squad" not in st.session_state:
             st.session_state.saved_squad = []
         if "starting_xi" not in st.session_state:
             st.session_state.starting_xi = []
@@ -289,9 +290,9 @@ elif page == "Squad":
         if "working_squad" not in st.session_state:
             st.session_state.working_squad = list(st.session_state.saved_squad)
 
-        # ---------- SAVE / LOAD SQUAD ----------
+        # ---------- SAVE / LOAD ----------
         st.markdown("### Save / Load Squad")
-        st.caption("Your squad stays while you use the app. Use Download/Upload as a backup for later.")
+        st.caption("Your squad stays while you use the app. Use Download/Upload as a backup.")
 
         col_save, col_load = st.columns(2)
 
@@ -360,7 +361,7 @@ elif page == "Squad":
             key=f"multi_{pos_choice}"
         )
 
-        # Rebuild working_squad for this position
+        # Update working squad for this position
         new_working = []
         for pid in st.session_state.working_squad:
             p = players_by_id.get(pid)
@@ -415,207 +416,6 @@ elif page == "Squad":
                 st.session_state.captain = None
                 st.session_state.vice = None
                 st.rerun()
-        with col_save:
-            if len(st.session_state.saved_squad) == 15:
-                import json
-                squad_data = {
-                    "saved_squad": st.session_state.saved_squad,
-                    "starting_xi": st.session_state.starting_xi,
-                    "captain": st.session_state.captain,
-                    "vice": st.session_state.vice
-                }
-                json_str = json.dumps(squad_data, indent=2)
-                st.download_button(
-                    label="⬇️ Download Squad (Backup)",
-                    data=json_str,
-                    file_name="my_fpl_squad.json",
-                    mime="application/json",
-                    use_container_width=True
-                )
-            else:
-                st.info("Build and save a full 15-player squad first.")
-
-        with col_load:
-            uploaded_file = st.file_uploader(
-                "⬆️ Upload previous squad",
-                type=["json"],
-                label_visibility="collapsed"
-            )
-                       if uploaded_file is not None:
-                try:
-                    import json
-                    data = json.load(uploaded_file)
-                    st.session_state.saved_squad = data.get("saved_squad", [])
-                    st.session_state.starting_xi = data.get("starting_xi", [])
-                    st.session_state.captain = data.get("captain")
-                    st.session_state.vice = data.get("vice")
-                    st.success("Squad loaded!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not load file: {e}")
-
-        # ---------- NOW the build section starts ----------
-        st.markdown("### 1. Build your 15-man squad")
-
-        if "working_squad" not in st.session_state:
-            st.session_state.working_squad = list(st.session_state.saved_squad)
-        ...
-        # Live working list
-        if "working_squad" not in st.session_state:
-            st.session_state.working_squad = list(st.session_state.saved_squad)
-
-        pos_choice = st.selectbox("Select position to add from", ["GKP", "DEF", "MID", "FWD"])
-
-        # Players already selected for other positions
-        already_selected = set(st.session_state.working_squad)
-
-        options = []
-        option_ids = {}
-        for p in bootstrap["elements"]:
-            if pos_map[p["element_type"]] == pos_choice:
-                label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - £{p['now_cost']/10:.1f}m"
-                options.append(label)
-                option_ids[label] = p["id"]
-
-        # Pre-select players already in working_squad for this position
-        default_labels = [label for label, pid in option_ids.items() if pid in already_selected]
-
-        selected = st.multiselect(
-            f"Choose {pos_choice} players",
-            options=options,
-            default=default_labels,
-            max_selections=limits[pos_choice],
-            key=f"multi_{pos_choice}"
-        )
-
-        # Update working_squad for this position
-        # First remove any previous players of this position
-        new_working = []
-        for pid in st.session_state.working_squad:
-            p = players_by_id.get(pid)
-            if p and pos_map[p["element_type"]] != pos_choice:
-                new_working.append(pid)
-
-        # Add the newly selected ones
-        for label in selected:
-            new_working.append(option_ids[label])
-
-        st.session_state.working_squad = list(set(new_working))  # remove duplicates
-
-        # Live counts
-        counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
-        team_counts = {}
-        for pid in st.session_state.working_squad:
-            p = players_by_id.get(pid)
-            if p:
-                pos = pos_map[p["element_type"]]
-                counts[pos] += 1
-                team_id = p.get("team")
-                team_counts[team_id] = team_counts.get(team_id, 0) + 1
-
-        st.write(f"**Current counts:** GKP {counts['GKP']}/2 · DEF {counts['DEF']}/5 · MID {counts['MID']}/5 · FWD {counts['FWD']}/3  → **Total {len(st.session_state.working_squad)}/15**")
-
-        # Show teams that already have 3 players
-        full_teams = [teams.get(tid, "?") for tid, c in team_counts.items() if c >= 3]
-        if full_teams:
-            st.caption(f"Teams at max (3 players): {', '.join(full_teams)}")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("💾 Save Squad", type="primary"):
-                # Final validation
-                if len(st.session_state.working_squad) != 15:
-                    st.error("You need exactly 15 players.")
-                elif counts["GKP"] != 2 or counts["DEF"] != 5 or counts["MID"] != 5 or counts["FWD"] != 3:
-                    st.error("Position counts must be exactly 2 GKP / 5 DEF / 5 MID / 3 FWD.")
-                elif any(c > 3 for c in team_counts.values()):
-                    st.error("Maximum 3 players from the same club.")
-                else:
-                    st.session_state.saved_squad = list(st.session_state.working_squad)
-                    st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
-                    if st.session_state.captain not in st.session_state.saved_squad:
-                        st.session_state.captain = None
-                    if st.session_state.vice not in st.session_state.saved_squad:
-                        st.session_state.vice = None
-                    st.success("Squad saved successfully!")
-                    st.rerun()
-        with col2:
-            if st.button("Clear Squad"):
-                st.session_state.saved_squad = []
-                st.session_state.working_squad = []
-                st.session_state.starting_xi = []
-                st.session_state.captain = None
-                st.session_state.vice = None
-                st.rerun()
-
-                    # Position limit
-                    if temp_counts[pos] >= limits[pos]:
-                        continue
-
-                    # Max 3 players from the same team
-                    if team_counts.get(team_id, 0) >= 3:
-                        continue
-
-                    final.append(pid)
-                    temp_counts[pos] += 1
-                    team_counts[team_id] = team_counts.get(team_id, 0) + 1
-
-                # Extra validation messages
-                if len(final) < 15:
-                    st.warning("Could not save full 15. Check position limits (2/5/5/3) and max 3 players per club.")
-                else:
-                    st.session_state.saved_squad = final
-                    st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in final]
-                    if st.session_state.captain not in final:
-                        st.session_state.captain = None
-                    if st.session_state.vice not in final:
-                        st.session_state.vice = None
-                    st.success("Squad saved! (FPL rules applied)")
-                    st.rerun()
-                st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in final]
-                if st.session_state.captain not in final:
-                    st.session_state.captain = None
-                if st.session_state.vice not in final:
-                    st.session_state.vice = None
-                st.success("Squad saved!")
-                st.rerun()
-        with col2:
-            if st.button("Clear Squad"):
-                st.session_state.saved_squad = []
-                st.session_state.starting_xi = []
-                st.session_state.captain = None
-                st.session_state.vice = None
-                st.rerun()
-
-        if len(st.session_state.saved_squad) == 15:
-            st.markdown("---")
-            st.markdown("### 2. Starting XI, Bench & Captain")
-
-            total_value = sum(players_by_id[pid]["now_cost"] / 10 for pid in st.session_state.saved_squad if pid in players_by_id)
-            bank = 100.0 - total_value
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Squad Value", f"£{total_value:.1f}m")
-            c2.metric("In the Bank", f"£{bank:.1f}m")
-            c3.metric("Players", "15/15")
-
-            if not st.session_state.starting_xi:
-                gk = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] == "GKP"]
-                outfield = [pid for pid in st.session_state.saved_squad if pos_map[players_by_id[pid]["element_type"]] != "GKP"]
-                st.session_state.starting_xi = (gk[:1] + outfield[:10]) if gk else outfield[:11]
-
-            st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
-
-            starters = [make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap) for pid in st.session_state.starting_xi]
-            bench_ids = [pid for pid in st.session_state.saved_squad if pid not in st.session_state.starting_xi]
-            bench = [make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap) for pid in bench_ids]
-
-            valid, formation_msg = is_valid_formation(starters)
-
-            if valid and len(starters) == 11:
-                st.success(f"Valid formation: **{formation_msg}**")
-            else:
-                st.error(f"Invalid Starting XI: {formation_msg if len(starters)==11 else 'Must have exactly 11 players'}")
                 
                            # ---------- VISUAL PITCH ----------
             st.markdown("### Pitch View")
