@@ -494,11 +494,18 @@ elif page == "Squad":
             mids = [r for r in starters if r["Pos"] == "MID"]
             fwds = [r for r in starters if r["Pos"] == "FWD"]
 
-            def player_card(p, show_sub_button=False):
+                        def player_card(p, show_sub_button=False):
                 is_c = st.session_state.captain == p["id"]
                 is_v = st.session_state.vice == p["id"]
-                badge = " ©️" if is_c else (" ⓥ" if is_v else "")
-                card = f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \nFDR {p['Next FDR']}"
+
+                if is_c:
+                    badge = " ©️ CAP"
+                elif is_v:
+                    badge = " ⓥ VC"
+                else:
+                    badge = ""
+
+                card = f"**{p['Player']}{badge}**  \n{p['Team']} · £{p['Price']}m  \n{p.get('Fixture', f'FDR {p[\"Next FDR\"]}')}"
 
                 if is_c:
                     st.success(card)
@@ -510,7 +517,6 @@ elif page == "Squad":
                 if show_sub_button and bench:
                     if st.button("⇄ Sub", key=f"sub_{p['id']}", use_container_width=True):
                         st.session_state.sub_player = p["id"]
-
             # GK
             if gk:
                 c1, c2, c3 = st.columns([1.2, 1, 1.2])
