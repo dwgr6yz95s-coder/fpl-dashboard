@@ -380,12 +380,12 @@ elif page == "Squad":
                 st.session_state.vice = db_data.get("vice")
                 st.success("Squad loaded from cloud!")
             st.session_state.db_loaded = True
-
+            
         # ---------- SAVE / LOAD ----------
-               st.markdown("### Save / Load Squad")
+        st.markdown("### Save / Load Squad")
         st.caption("Squad is saved to the cloud automatically. JSON download is only a backup.")
-        
-                if len(st.session_state.saved_squad) == 15:
+
+        if len(st.session_state.saved_squad) == 15:
             st.success("Cloud status: Squad is saved and ready")
         else:
             st.info("Cloud status: No full squad saved yet")
@@ -403,7 +403,7 @@ elif page == "Squad":
                 }
                 json_str = json.dumps(squad_data, indent=2)
                 st.download_button(
-                label="⬇️ Download backup (optional)",
+                    label="⬇️ Download backup (optional)",
                     data=json_str,
                     file_name="my_fpl_squad.json",
                     mime="application/json",
