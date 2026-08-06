@@ -196,12 +196,7 @@ def load_squad_from_db(team_id):
     except Exception as e:
         st.warning(f"Could not load from database: {e}")
         return None
-
-# ---------- SIDEBAR ----------
-st.sidebar.markdown("### ⚙️ Settings")
-...
-
-
+        
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
 default_id = 570479
