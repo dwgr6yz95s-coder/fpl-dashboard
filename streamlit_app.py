@@ -594,6 +594,7 @@ elif page == "Squad":
                     "Price": r["Price"]
                 })
             st.dataframe(display, use_container_width=True, hide_index=True)
+            
         elif st.session_state.saved_squad:
             st.warning(f"You currently have {len(st.session_state.saved_squad)}/15 players. Finish the squad first.")
         else:
