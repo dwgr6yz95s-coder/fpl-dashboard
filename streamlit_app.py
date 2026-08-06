@@ -457,13 +457,26 @@ elif page == "Squad":
                 elif any(c > 3 for c in team_counts.values()):
                     st.error("Maximum 3 players from the same club.")
                 else:
+                                    else:
                     st.session_state.saved_squad = list(st.session_state.working_squad)
                     st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
                     if st.session_state.captain not in st.session_state.saved_squad:
                         st.session_state.captain = None
                     if st.session_state.vice not in st.session_state.saved_squad:
                         st.session_state.vice = None
-                    st.success("Squad saved successfully!")
+
+                    # Save to Supabase
+                    ok = save_squad_to_db(
+                        TEAM_ID,
+                        st.session_state.saved_squad,
+                        st.session_state.starting_xi,
+                        st.session_state.captain,
+                        st.session_state.vice
+                    )
+                    if ok:
+                        st.success("Squad saved to cloud!")
+                    else:
+                        st.success("Squad saved locally (cloud save failed)")
                     st.rerun()
         with col2:
             if st.button("Clear Squad"):
