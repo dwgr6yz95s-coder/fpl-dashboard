@@ -335,6 +335,18 @@ elif page == "Squad":
         if "sub_player" not in st.session_state:
             st.session_state.sub_player = None
 
+                # Try to load squad from Supabase (only once per session)
+        if "db_loaded" not in st.session_state:
+            db_data = load_squad_from_db(TEAM_ID)
+            if db_data:
+                st.session_state.saved_squad = db_data.get("saved_squad") or []
+                st.session_state.working_squad = list(st.session_state.saved_squad)
+                st.session_state.starting_xi = db_data.get("starting_xi") or []
+                st.session_state.captain = db_data.get("captain")
+                st.session_state.vice = db_data.get("vice")
+                st.success("Squad loaded from cloud!")
+            st.session_state.db_loaded = True
+
         # ---------- SAVE / LOAD ----------
         st.markdown("### Save / Load Squad")
         st.caption("Your squad stays while you use the app. Use Download/Upload as a backup.")
