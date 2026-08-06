@@ -95,7 +95,7 @@ def get_next_fixture_difficulty(team_id, fixtures, bootstrap):
             if fix.get("team_a") == team_id:
                 return fix.get("team_a_difficulty", 3)
     return 3
-
+    
 def potential_score(player, fixtures, bootstrap):
     try:
         form = float(player.get("form") or 0)
@@ -105,8 +105,34 @@ def potential_score(player, fixtures, bootstrap):
         ppg = float(player.get("points_per_game") or 0)
     except:
         ppg = 0
+    try:
+        ownership = float(player.get("selected_by_percent") or 0)
+    except:
+        ownership = 0
+    try:
+        minutes = float(player.get("minutes") or 0)
+    except:
+        minutes = 0
+
     fdr = get_next_fixture_difficulty(player.get("team"), fixtures, bootstrap)
-    score = (form * 2.0) + (ppg * 1.5) + ((6 - fdr) * 3.0)
+
+    # Base score
+    score = (form * 2.5) + (ppg * 1.8) + ((6 - fdr) * 3.2)
+
+    # Small ownership adjustment (slight preference for differentials under 20%)
+    if ownership < 5:
+        score += 1.5          # strong differential
+    elif ownership < 15:
+        score += 0.8
+    elif ownership > 40:
+        score -= 0.5          # slight penalty for very popular picks
+
+    # Minutes reliability (pre-season this will be low for everyone)
+    if minutes > 500:
+        score += 1.0
+    elif minutes > 200:
+        score += 0.4
+
     return round(score, 2), fdr
 
 def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
