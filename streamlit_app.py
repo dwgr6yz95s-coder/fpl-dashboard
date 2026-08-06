@@ -384,6 +384,7 @@ elif page == "Squad":
         # ---------- SAVE / LOAD ----------
                st.markdown("### Save / Load Squad")
         st.caption("Squad is saved to the cloud automatically. JSON download is only a backup.")
+        
                 if len(st.session_state.saved_squad) == 15:
             st.success("Cloud status: Squad is saved and ready")
         else:
