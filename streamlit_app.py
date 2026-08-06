@@ -255,7 +255,16 @@ def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
         "Potential": score
     }
 
-def save_squad_to_db(team_id, saved_squad, starting_xi, captain, vice):
+def load_squad_from_db(team_id):
+    """Load the squad from Supabase"""
+    try:
+        result = supabase.table("squads").select("*").eq("team_id", team_id).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+    except Exception as e:
+        st.warning(f"Could not load from database: {e}")
+        return None
     """Save or update the squad in Supabase"""
     try:
         data = {
