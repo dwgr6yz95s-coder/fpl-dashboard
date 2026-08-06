@@ -272,16 +272,61 @@ def save_squad_to_db(team_id, saved_squad, starting_xi, captain, vice):
         st.error(f"Could not save to database: {e}")
         return False
 
-def load_squad_from_db(team_id):
-    """Load the squad from Supabase"""
-    try:
-        result = supabase.table("squads").select("*").eq("team_id", team_id).execute()
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        return None
-    except Exception as e:
-        st.warning(f"Could not load from database: {e}")
-        return None
+def auto_pick_best_xi(saved_squad, players_by_id, teams, pos_map, fixtures, bootstrap):
+    """Pick the highest-potential valid starting XI from the 15."""
+    if len(saved_squad) != 15:
+        return None, None, None
+
+    rows = []
+    for pid in saved_squad:
+        row = make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap)
+        rows.append(row)
+
+    # Sort by potential (highest first)
+    rows = sorted(rows, key=lambda x: -x["Potential"])
+
+    gk = [r for r in rows if r["Pos"] == "GKP"]
+    defs = [r for r in rows if r["Pos"] == "DEF"]
+    mids = [r for r in rows if r["Pos"] == "MID"]
+    fwds = [r for r in rows if r["Pos"] == "FWD"]
+
+    # Must have at least 1 GK, 3 DEF, 2 MID, 1 FWD
+    if not gk or len(defs) < 3 or len(mids) < 2 or len(fwds) < 1:
+        return None, None, None
+
+    # Start with minimum required
+    xi = [gk[0]] + defs[:3] + mids[:2] + fwds[:1]
+    remaining = defs[3:] + mids[2:] + fwds[1:]
+    remaining = sorted(remaining, key=lambda x: -x["Potential"])
+
+    # Fill up to 11 with the next best valid players
+    def_count = 3
+    mid_count = 2
+    fwd_count = 1
+
+    for p in remaining:
+        if len(xi) >= 11:
+            break
+        if p["Pos"] == "DEF" and def_count < 5:
+            xi.append(p)
+            def_count += 1
+        elif p["Pos"] == "MID" and mid_count < 5:
+            xi.append(p)
+            mid_count += 1
+        elif p["Pos"] == "FWD" and fwd_count < 3:
+            xi.append(p)
+            fwd_count += 1
+
+    if len(xi) != 11:
+        return None, None, None
+
+    xi_ids = [p["id"] for p in xi]
+    # Captain = highest potential in XI, Vice = second
+    xi_sorted = sorted(xi, key=lambda x: -x["Potential"])
+    captain_id = xi_sorted[0]["id"]
+    vice_id = xi_sorted[1]["id"] if len(xi_sorted) > 1 else None
+
+    return xi_ids, captain_id, vice_id
         
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
@@ -696,6 +741,28 @@ elif page == "Squad":
                         player_card(p, show_sub_button=True)
 
             st.caption("©️ = Captain   ·   ⓥ = Vice-Captain")
+
+                        if st.button("⚡ Auto-pick Best XI", type="primary"):
+                xi_ids, cap_id, vice_id = auto_pick_best_xi(
+                    st.session_state.saved_squad,
+                    players_by_id, teams, pos_map, fixtures, bootstrap
+                )
+                if xi_ids:
+                    st.session_state.starting_xi = xi_ids
+                    st.session_state.captain = cap_id
+                    st.session_state.vice = vice_id
+                    # Also save to cloud
+                    save_squad_to_db(
+                        TEAM_ID,
+                        st.session_state.saved_squad,
+                        st.session_state.starting_xi,
+                        st.session_state.captain,
+                        st.session_state.vice
+                    )
+                    st.success("Best XI selected and saved!")
+                    st.rerun()
+                else:
+                    st.error("Could not form a valid XI from your squad.")
 
             # ---------- SUBSTITUTE UI ----------
             if st.session_state.sub_player:
