@@ -683,6 +683,28 @@ elif page == "Squad":
             c3.metric("Players", "15/15")
 
             # ---------- VISUAL PITCH ----------
+                        # Auto-pick Best XI
+            if st.button("⚡ Auto-pick Best XI", type="primary"):
+                xi_ids, cap_id, vice_id = auto_pick_best_xi(
+                    st.session_state.saved_squad,
+                    players_by_id, teams, pos_map, fixtures, bootstrap
+                )
+                if xi_ids:
+                    st.session_state.starting_xi = xi_ids
+                    st.session_state.captain = cap_id
+                    st.session_state.vice = vice_id
+                    save_squad_to_db(
+                        TEAM_ID,
+                        st.session_state.saved_squad,
+                        st.session_state.starting_xi,
+                        st.session_state.captain,
+                        st.session_state.vice
+                    )
+                    st.success("Best XI selected and saved!")
+                    st.rerun()
+                else:
+                    st.error("Could not form a valid XI from your squad.")
+            
             st.markdown("### Pitch View")
 
             gk = [r for r in starters if r["Pos"] == "GKP"]
