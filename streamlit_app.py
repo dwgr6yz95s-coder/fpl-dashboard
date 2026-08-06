@@ -201,54 +201,7 @@ def load_squad_from_db(team_id):
 st.sidebar.markdown("### ⚙️ Settings")
 ...
 
-    # Get next opponent
-    opponent = "TBC"
-    is_home = None
-    next_gw = None
-    if bootstrap:
-        for event in bootstrap.get("events", []):
-            if event.get("is_next"):
-                next_gw = event["id"]
-                break
-    if not next_gw:
-        next_gw = 1
 
-    team_id = p.get("team")
-    if fixtures and team_id:
-        for fix in fixtures:
-            if fix.get("event") == next_gw:
-                if fix.get("team_h") == team_id:
-                    opp_id = fix.get("team_a")
-                    opponent = teams.get(opp_id, "?")
-                    is_home = True
-                    break
-                elif fix.get("team_a") == team_id:
-                    opp_id = fix.get("team_h")
-                    opponent = teams.get(opp_id, "?")
-                    is_home = False
-                    break
-
-    if is_home is True:
-        fixture_text = f"vs {opponent} (H)"
-    elif is_home is False:
-        fixture_text = f"vs {opponent} (A)"
-    else:
-        fixture_text = f"FDR {fdr}"
-
-    return {
-        "id": pid,
-        "Pos": pos_map.get(p.get("element_type"), "?"),
-        "Player": p.get("web_name", "Unknown"),
-        "Team": teams.get(p.get("team"), "?"),
-        "Price": round(p.get("now_cost", 0) / 10, 1),
-        "Change": change_str,
-        "Form": p.get("form", "0.0"),
-        "Points": p.get("total_points", 0),
-        "PPG": p.get("points_per_game", "0.0"),
-        "Next FDR": fdr,
-        "Fixture": fixture_text,
-        "Potential": score
-    }
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
 default_id = 570479
