@@ -457,7 +457,6 @@ elif page == "Squad":
                 elif any(c > 3 for c in team_counts.values()):
                     st.error("Maximum 3 players from the same club.")
                 else:
-                                    else:
                     st.session_state.saved_squad = list(st.session_state.working_squad)
                     st.session_state.starting_xi = [pid for pid in st.session_state.starting_xi if pid in st.session_state.saved_squad]
                     if st.session_state.captain not in st.session_state.saved_squad:
