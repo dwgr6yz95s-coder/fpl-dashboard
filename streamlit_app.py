@@ -168,6 +168,87 @@ def make_row(pid, players_by_id, teams, pos_map, fixtures, bootstrap):
         "Fixture": fixture_text,
         "Potential": score
     }
+
+def save_squad_to_db(team_id, saved_squad, starting_xi, captain, vice):
+    """Save or update the squad in Supabase"""
+    try:
+        data = {
+            "team_id": team_id,
+            "user_key": str(team_id),
+            "saved_squad": saved_squad,
+            "starting_xi": starting_xi,
+            "captain": captain,
+            "vice": vice
+        }
+        result = supabase.table("squads").upsert(data, on_conflict="team_id").execute()
+        return True
+    except Exception as e:
+        st.error(f"Could not save to database: {e}")
+        return False
+
+def load_squad_from_db(team_id):
+    """Load the squad from Supabase"""
+    try:
+        result = supabase.table("squads").select("*").eq("team_id", team_id).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+    except Exception as e:
+        st.warning(f"Could not load from database: {e}")
+        return None
+
+# ---------- SIDEBAR ----------
+st.sidebar.markdown("### ⚙️ Settings")
+...
+
+    # Get next opponent
+    opponent = "TBC"
+    is_home = None
+    next_gw = None
+    if bootstrap:
+        for event in bootstrap.get("events", []):
+            if event.get("is_next"):
+                next_gw = event["id"]
+                break
+    if not next_gw:
+        next_gw = 1
+
+    team_id = p.get("team")
+    if fixtures and team_id:
+        for fix in fixtures:
+            if fix.get("event") == next_gw:
+                if fix.get("team_h") == team_id:
+                    opp_id = fix.get("team_a")
+                    opponent = teams.get(opp_id, "?")
+                    is_home = True
+                    break
+                elif fix.get("team_a") == team_id:
+                    opp_id = fix.get("team_h")
+                    opponent = teams.get(opp_id, "?")
+                    is_home = False
+                    break
+
+    if is_home is True:
+        fixture_text = f"vs {opponent} (H)"
+    elif is_home is False:
+        fixture_text = f"vs {opponent} (A)"
+    else:
+        fixture_text = f"FDR {fdr}"
+
+    return {
+        "id": pid,
+        "Pos": pos_map.get(p.get("element_type"), "?"),
+        "Player": p.get("web_name", "Unknown"),
+        "Team": teams.get(p.get("team"), "?"),
+        "Price": round(p.get("now_cost", 0) / 10, 1),
+        "Change": change_str,
+        "Form": p.get("form", "0.0"),
+        "Points": p.get("total_points", 0),
+        "PPG": p.get("points_per_game", "0.0"),
+        "Next FDR": fdr,
+        "Fixture": fixture_text,
+        "Potential": score
+    }
 # ---------- SIDEBAR ----------
 st.sidebar.markdown("### ⚙️ Settings")
 default_id = 570479
