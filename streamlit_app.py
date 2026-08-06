@@ -633,3 +633,308 @@ elif page == "Squad":
             st.warning(f"You currently have {len(st.session_state.saved_squad)}/15 players saved. Finish the squad first.")
         else:
             st.info("No players saved yet. Add players by position above, then click **Save Squad**.")
+            
+elif page == "Mini-Leagues":
+    st.subheader("Mini-Leagues")
+    st.caption("Your classic leagues + standings (top of the table)")
+    if not entry:
+        st.error("Could not load manager data.")
+    else:
+        classic = entry.get("leagues", {}).get("classic", [])
+        if not classic:
+            st.write("No classic leagues found.")
+        else:
+            league_names = {l["id"]: l["name"] for l in classic}
+            selected_league = st.selectbox(
+                "Select a league",
+                options=list(league_names.keys()),
+                format_func=lambda x: f"{league_names[x]} (ID: {x})"
+            )
+            st.write(f"**Your rank in this league:** {next((l.get('entry_rank', 'N/A') for l in classic if l['id'] == selected_league), 'N/A')}")
+            standings = load_league_standings(selected_league)
+            if standings and "standings" in standings:
+                results = standings["standings"].get("results", [])
+                if results:
+                    rows = [{"Rank": r.get("rank"), "Team": r.get("entry_name"), "Manager": r.get("player_name"), "GW Points": r.get("event_total"), "Total": r.get("total")} for r in results[:25]]
+                    st.dataframe(rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No standings available yet (common in pre-season).")
+            else:
+                st.info("Could not load standings for this league yet.")
+
+elif page == "Fixtures":
+    st.subheader("Upcoming Fixtures")
+    st.caption("Next 5 gameweeks · FDR: 1 = easiest, 5 = hardest")
+    if not bootstrap or not fixtures:
+        st.error("Could not load fixtures.")
+    else:
+        short = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        next_gws = []
+        for event in bootstrap.get("events", []):
+            if event.get("is_next") or (next_gws and len(next_gws) < 5):
+                next_gws.append(event["id"])
+                if len(next_gws) >= 5:
+                    break
+        if not next_gws:
+            next_gws = [1, 2, 3, 4, 5]
+        selected = st.selectbox("Select Gameweek", ["All"] + [f"Gameweek {gw}" for gw in next_gws])
+        for gw in next_gws:
+            if selected != "All" and selected != f"Gameweek {gw}":
+                continue
+            gw_fixtures = [f for f in fixtures if f.get("event") == gw]
+            if not gw_fixtures:
+                continue
+            st.markdown(f"### Gameweek {gw}")
+            rows = []
+            for f in sorted(gw_fixtures, key=lambda x: x.get("kickoff_time") or ""):
+                kickoff = f.get("kickoff_time")
+                if kickoff:
+                    try:
+                        dt = kickoff.replace("Z", "")
+                        kickoff_fmt = dt[8:10] + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(dt[5:7])-1] + " " + dt[11:16]
+                    except:
+                        kickoff_fmt = kickoff[:16].replace("T", " ")
+                else:
+                    kickoff_fmt = "TBC"
+                rows.append({
+                    "Kickoff": kickoff_fmt,
+                    "Home": short.get(f["team_h"], "?"),
+                    "Away": short.get(f["team_a"], "?"),
+                    "Home FDR": f.get("team_h_difficulty", "-"),
+                    "Away FDR": f.get("team_a_difficulty", "-")
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+elif page == "Fixture Difficulty":
+    st.subheader("Fixture Difficulty (FDR)")
+    st.caption("1 = Easiest · 5 = Hardest")
+    if bootstrap and fixtures:
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        next_gws = []
+        for event in bootstrap.get("events", []):
+            if event.get("is_next") or (next_gws and len(next_gws) < 5):
+                next_gws.append(event["id"])
+                if len(next_gws) >= 5:
+                    break
+        if not next_gws:
+            next_gws = [1, 2, 3, 4, 5]
+        team_fdr = defaultdict(lambda: {gw: "-" for gw in next_gws})
+        for fix in fixtures:
+            gw = fix.get("event")
+            if gw in next_gws:
+                team_fdr[fix["team_h"]][gw] = fix.get("team_h_difficulty", 3)
+                team_fdr[fix["team_a"]][gw] = fix.get("team_a_difficulty", 3)
+        results = []
+        for team_id, gw_diffs in team_fdr.items():
+            values = [v for v in gw_diffs.values() if isinstance(v, (int, float))]
+            avg = sum(values) / len(values) if values else 3.0
+            row = {"Team": teams.get(team_id, "?")}
+            for gw in next_gws:
+                row[f"GW{gw}"] = gw_diffs[gw]
+            row["Avg"] = round(avg, 2)
+            results.append(row)
+        results = sorted(results, key=lambda x: x["Avg"])
+        st.dataframe(results, use_container_width=True, hide_index=True)
+    else:
+        st.error("Could not load fixture data.")
+
+elif page == "Players - Easiest Fixtures":
+    st.subheader("Players with Easiest Fixtures")
+    st.caption("Sorted by easiest upcoming fixtures")
+    if bootstrap and fixtures:
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        next_gws = []
+        for event in bootstrap.get("events", []):
+            if event.get("is_next") or (next_gws and len(next_gws) < 5):
+                next_gws.append(event["id"])
+                if len(next_gws) >= 5:
+                    break
+        if not next_gws:
+            next_gws = [1, 2, 3, 4, 5]
+        team_fdr = defaultdict(list)
+        for fix in fixtures:
+            gw = fix.get("event")
+            if gw in next_gws:
+                team_fdr[fix["team_h"]].append(fix.get("team_h_difficulty", 3))
+                team_fdr[fix["team_a"]].append(fix.get("team_a_difficulty", 3))
+        team_avg = {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
+        pos_choice = st.selectbox("Filter by position", ["All", "Goalkeepers", "Defenders", "Midfielders", "Forwards"])
+        pos_map = {"Goalkeepers": 1, "Defenders": 2, "Midfielders": 3, "Forwards": 4}
+        selected_pos = pos_map.get(pos_choice)
+        players = []
+        for p in bootstrap.get("elements", []):
+            if selected_pos and p["element_type"] != selected_pos:
+                continue
+            avg = team_avg.get(p["team"], 3.0)
+            players.append({
+                "Pos": positions.get(p["element_type"], "?"),
+                "Player": p["web_name"],
+                "Team": teams.get(p["team"], "?"),
+                "Price": round(p["now_cost"] / 10, 1),
+                "Form": p.get("form", "-"),
+                "Selected %": p.get("selected_by_percent", "-"),
+                "Points": p.get("total_points", 0),
+                "Avg FDR": round(avg, 2)
+            })
+        players = sorted(players, key=lambda x: x["Avg FDR"])[:30]
+        st.dataframe(players, use_container_width=True, hide_index=True)
+    else:
+        st.error("Could not load data.")
+
+elif page == "Player Detail":
+    st.subheader("Player Detail")
+    st.caption("Deep dive into a single player (history + upcoming fixtures)")
+    if not bootstrap:
+        st.error("Could not load player list.")
+    else:
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        player_options = {}
+        for p in bootstrap["elements"]:
+            label = f"{p['web_name']} ({teams.get(p['team'], '?')}) - {pos_map.get(p['element_type'], '?')} - £{p['now_cost']/10:.1f}m"
+            player_options[label] = p["id"]
+        chosen = st.selectbox("Select a player", ["— Choose a player —"] + list(player_options.keys()))
+        if chosen != "— Choose a player —":
+            pid = player_options[chosen]
+            summary = load_element_summary(pid)
+            player = next((p for p in bootstrap["elements"] if p["id"] == pid), {})
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Price", f"£{player.get('now_cost', 0)/10:.1f}m")
+            c2.metric("Form", player.get("form", "-"))
+            c3.metric("Total Points", player.get("total_points", 0))
+            c4.metric("Selected by", f"{player.get('selected_by_percent', '-')}%")
+            if summary:
+                upcoming = summary.get("fixtures", [])
+                if upcoming:
+                    st.markdown("### Upcoming Fixtures")
+                    fix_rows = []
+                    for f in upcoming[:8]:
+                        fix_rows.append({
+                            "GW": f.get("event"),
+                            "Opponent": f.get("opponent_name") or teams.get(f.get("opponent"), "?"),
+                            "Home/Away": "H" if f.get("is_home") else "A",
+                            "Difficulty": f.get("difficulty"),
+                            "Kickoff": (f.get("kickoff_time") or "")[:16].replace("T", " ")
+                        })
+                    st.dataframe(fix_rows, use_container_width=True, hide_index=True)
+                history = summary.get("history", [])
+                if history:
+                    st.markdown("### This Season (Gameweek History)")
+                    hist_rows = [{"GW": h.get("round"), "Points": h.get("total_points"), "Minutes": h.get("minutes"),
+                                  "Goals": h.get("goals_scored"), "Assists": h.get("assists"), "CS": h.get("clean_sheets"),
+                                  "Bonus": h.get("bonus"), "Value": round(h.get("value", 0) / 10, 1)} for h in history]
+                    st.dataframe(hist_rows, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No gameweek history yet for this player.")
+                past = summary.get("history_past", [])
+                if past:
+                    st.markdown("### Previous Seasons")
+                    past_rows = [{"Season": s.get("season_name"), "Points": s.get("total_points"), "Minutes": s.get("minutes"),
+                                  "Goals": s.get("goals_scored"), "Assists": s.get("assists"),
+                                  "Start Price": round(s.get("start_cost", 0) / 10, 1),
+                                  "End Price": round(s.get("end_cost", 0) / 10, 1)} for s in past]
+                    st.dataframe(past_rows, use_container_width=True, hide_index=True)
+            else:
+                st.warning("Could not load detailed data for this player.")
+
+elif page == "Dream Team":
+    st.subheader("Dream Team")
+    st.caption("Official highest-scoring XI for a gameweek")
+    if not bootstrap:
+        st.error("Could not load data.")
+    else:
+        available_gws = [e["id"] for e in bootstrap.get("events", []) if e.get("finished") or e.get("is_current") or e.get("id") == 1]
+        if not available_gws:
+            available_gws = [1]
+        gw = st.selectbox("Select Gameweek", available_gws, index=len(available_gws)-1)
+        dream = load_dream_team(gw)
+        if not dream or "team" not in dream:
+            st.info("Dream Team not available yet for this gameweek (normal in pre-season).")
+        else:
+            teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+            players = {p["id"]: p for p in bootstrap["elements"]}
+            pos_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+            st.metric("Total Points", dream.get("team_points", "-"))
+            rows = []
+            for pick in dream.get("team", []):
+                pid = pick.get("element")
+                p = players.get(pid, {})
+                rows.append({
+                    "Pos": pos_map.get(p.get("element_type"), "?"),
+                    "Player": p.get("web_name", "Unknown"),
+                    "Team": teams.get(p.get("team"), "?"),
+                    "Points": pick.get("points", 0)
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+elif page == "Transfer Suggestions":
+    st.subheader("Transfer Suggestions")
+    st.caption("Uses your saved squad when available. Not financial advice.")
+    if not bootstrap or not fixtures:
+        st.error("Could not load data.")
+    else:
+        teams = {t["id"]: t["short_name"] for t in bootstrap["teams"]}
+        positions = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
+        owned_ids = set(st.session_state.get("saved_squad", []))
+        if owned_ids:
+            st.success(f"Using your saved squad ({len(owned_ids)} players). Suggestions exclude them.")
+        else:
+            st.info("No saved squad yet. Build one on the Squad page for better suggestions.")
+        next_gws = []
+        for event in bootstrap.get("events", []):
+            if event.get("is_next") or (next_gws and len(next_gws) < 5):
+                next_gws.append(event["id"])
+                if len(next_gws) >= 5:
+                    break
+        if not next_gws:
+            next_gws = [1, 2, 3, 4, 5]
+        team_fdr = defaultdict(list)
+        for fix in fixtures:
+            gw = fix.get("event")
+            if gw in next_gws:
+                team_fdr[fix["team_h"]].append(fix.get("team_h_difficulty", 3))
+                team_fdr[fix["team_a"]].append(fix.get("team_a_difficulty", 3))
+        team_avg = {tid: sum(d)/len(d) for tid, d in team_fdr.items() if d}
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            max_price = st.slider("Max price (£m)", 4.0, 15.0, 8.5, 0.5)
+        with c2:
+            max_fdr = st.slider("Max Avg FDR", 2.0, 4.0, 3.0, 0.1)
+        with c3:
+            min_owned = st.slider("Min ownership %", 0.0, 30.0, 2.0, 0.5)
+        with c4:
+            sort_by = st.selectbox("Sort by", ["Easiest fixtures", "Highest ownership", "Lowest price"])
+        pos_choice = st.selectbox("Position", ["All", "Goalkeepers", "Defenders", "Midfielders", "Forwards"])
+        pos_map = {"Goalkeepers": 1, "Defenders": 2, "Midfielders": 3, "Forwards": 4}
+        selected_pos = pos_map.get(pos_choice)
+        suggestions = []
+        for p in bootstrap.get("elements", []):
+            if p["id"] in owned_ids:
+                continue
+            if selected_pos and p["element_type"] != selected_pos:
+                continue
+            price = p["now_cost"] / 10
+            avg = team_avg.get(p["team"], 3.0)
+            owned = float(p.get("selected_by_percent", 0) or 0)
+            if price <= max_price and avg <= max_fdr and owned >= min_owned:
+                suggestions.append({
+                    "Pos": positions.get(p["element_type"], "?"),
+                    "Player": p["web_name"],
+                    "Team": teams.get(p["team"], "?"),
+                    "Price": round(price, 1),
+                    "Avg FDR": round(avg, 2),
+                    "Selected %": owned,
+                    "Form": p.get("form", "-")
+                })
+        if sort_by == "Easiest fixtures":
+            suggestions = sorted(suggestions, key=lambda x: (x["Avg FDR"], -x["Selected %"]))
+        elif sort_by == "Highest ownership":
+            suggestions = sorted(suggestions, key=lambda x: -x["Selected %"])
+        else:
+            suggestions = sorted(suggestions, key=lambda x: x["Price"])
+        suggestions = suggestions[:25]
+        if suggestions:
+            st.dataframe(suggestions, use_container_width=True, hide_index=True)
+        else:
+            st.info("No players match your current filters.")
