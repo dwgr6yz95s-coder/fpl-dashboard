@@ -742,28 +742,7 @@ elif page == "Squad":
 
             st.caption("©️ = Captain   ·   ⓥ = Vice-Captain")
 
-                        if st.button("⚡ Auto-pick Best XI", type="primary"):
-                xi_ids, cap_id, vice_id = auto_pick_best_xi(
-                    st.session_state.saved_squad,
-                    players_by_id, teams, pos_map, fixtures, bootstrap
-                )
-                if xi_ids:
-                    st.session_state.starting_xi = xi_ids
-                    st.session_state.captain = cap_id
-                    st.session_state.vice = vice_id
-                    # Also save to cloud
-                    save_squad_to_db(
-                        TEAM_ID,
-                        st.session_state.saved_squad,
-                        st.session_state.starting_xi,
-                        st.session_state.captain,
-                        st.session_state.vice
-                    )
-                    st.success("Best XI selected and saved!")
-                    st.rerun()
-                else:
-                    st.error("Could not form a valid XI from your squad.")
-
+        
             # ---------- SUBSTITUTE UI ----------
             if st.session_state.sub_player:
                 outgoing = next((r for r in starters if r["id"] == st.session_state.sub_player), None)
